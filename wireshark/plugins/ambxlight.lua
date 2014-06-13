@@ -12,6 +12,10 @@
 
 ambxlight_proto = Proto("ambxlight", "Cyborg amBX Light Pods payload")
 
+-- ========================================================
+-- Get value from USB protocol field.
+-- ========================================================
+data_len_f = Field.new("usb.data_len")
 
 -- ========================================================
 -- Cyborg amBX Light Pods USB payload fields definition.
@@ -32,11 +36,16 @@ ambxlight_proto.fields = {color_F, speed_F, color_hex_F, color_rgb_F}
 -- ========================================================
 function ambxlight_proto.dissector(buffer, pinfo, tree)
 
-	local start = 2
+	local data_len = data_len_f()
+	if data_len.value < 9 then
+		local data_dissector = Dissector.get("data")
+		data_dissector:call(buffer(0):tvb(), pinfo, tree)
+		do return end
+	end
 
-	local ambxlight_range = buffer(start, 5)
-	local color_range = buffer(start, 3)
-	local speed_range = buffer(start + 3, 2)
+	local ambxlight_range = buffer(0, 9)
+	local color_range = buffer(2, 3)
+	local speed_range = buffer(5, 2)
 
 	local color = color_range:uint()
 	local speed = speed_range:uint()
@@ -57,13 +66,13 @@ function ambxlight_proto.dissector(buffer, pinfo, tree)
 		color_name = "Unknown"
 	end
 
-	local subcolortree = subtree:add(color_F, buffer(start, 3), color_name)
+	local subcolortree = subtree:add(color_F, color_range, color_name)
 	subcolortree:add(color_hex_F, color_range, color)
 	subcolortree:add(color_rgb_F, color_range, string.format("rgb( %d, %d, %d)", (color / (256 * 256)), (color / 256) % 256, color % 256))
 	subtree:add(speed_F, speed_range, (speed % 256) * 256 + (speed / 256))
 
 	local data_dissector = Dissector.get("data")
-	data_dissector:call(buffer(start + 5):tvb(), pinfo, tree)
+	data_dissector:call(buffer(9):tvb(), pinfo, tree)
 end
 
 -- ========================================================
