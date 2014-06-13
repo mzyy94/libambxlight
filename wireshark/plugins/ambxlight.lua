@@ -32,7 +32,7 @@ ambxlight_proto.fields = {color_F, speed_F, color_hex_F, color_rgb_F}
 -- ========================================================
 function ambxlight_proto.dissector(buffer, pinfo, tree)
 
-	local start = 30
+	local start = 2
 
 	local ambxlight_range = buffer(start, 5)
 	local color_range = buffer(start, 3)
@@ -69,4 +69,5 @@ end
 -- ========================================================
 -- Register ambxlight_proto.
 -- ========================================================
-register_postdissector(ambxlight_proto)
+usb_table = DissectorTable.get("usb.control")
+usb_table:add(0xffff, ambxlight_proto)
