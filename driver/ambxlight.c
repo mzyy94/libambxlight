@@ -56,6 +56,13 @@ struct usb_ambx_light {
 	size_t			bulk_in_copied;		/* already copied to user space */
 	__u8			bulk_in_endpointAddr;	/* the address of the bulk in endpoint */
 	__u8			bulk_out_endpointAddr;	/* the address of the bulk out endpoint */
+
+	unsigned char			*ctrl_buffer;	/* the buffer to send/receive data */
+	struct urb		*ctrl_urb;			/* the urb to write/read data with */
+	struct usb_ctrlrequest	*ctrl_dr;	/* setup packet information */
+	size_t			ctrl_size;		/* the size of the send/receive buffer */
+	__u8			ctrl_endpointAddr;	/* the address of the ctrl endpoint */
+
 	int			errors;			/* the last request tanked */
 	bool			ongoing_read;		/* a read is going on */
 	spinlock_t		err_lock;		/* lock for errors */
@@ -73,8 +80,11 @@ static void ambx_light_delete(struct kref *kref)
 	struct usb_ambx_light *dev = to_ambx_light_dev(kref);
 
 	usb_free_urb(dev->bulk_in_urb);
+	usb_free_urb(dev->ctrl_urb); /* new */
 	usb_put_dev(dev->udev);
 	kfree(dev->bulk_in_buffer);
+	kfree(dev->ctrl_buffer); /* new */
+	kfree(dev->ctrl_dr); /* new */
 	kfree(dev);
 }
 
@@ -158,6 +168,7 @@ static int ambx_light_flush(struct file *file, fl_owner_t id)
 	return res;
 }
 
+#if 1
 static void ambx_light_read_bulk_callback(struct urb *urb)
 {
 	struct usb_ambx_light *dev;
@@ -183,6 +194,16 @@ static void ambx_light_read_bulk_callback(struct urb *urb)
 
 	wake_up_interruptible(&dev->bulk_in_wait);
 }
+#else
+
+/* new */
+static void ambx_light_ctrl_callback(struct urb *urb)
+{
+	struct usb_ambx_light *dev;
+
+	dev = urb->context;
+}
+#endif
 
 static int ambx_light_do_read_io(struct usb_ambx_light *dev, size_t count)
 {
@@ -330,6 +351,7 @@ exit:
 	return rv;
 }
 
+#if 0
 static void ambx_light_write_bulk_callback(struct urb *urb)
 {
 	struct usb_ambx_light *dev;
@@ -343,6 +365,34 @@ static void ambx_light_write_bulk_callback(struct urb *urb)
 		    urb->status == -ESHUTDOWN))
 			dev_err(&dev->interface->dev,
 				"%s - nonzero write bulk status received: %d\n",
+				__func__, urb->status);
+
+		spin_lock(&dev->err_lock);
+		dev->errors = urb->status;
+		spin_unlock(&dev->err_lock);
+	}
+
+	/* free up our allocated buffer */
+	usb_free_coherent(urb->dev, urb->transfer_buffer_length,
+			  urb->transfer_buffer, urb->transfer_dma);
+	up(&dev->limit_sem);
+}
+#endif
+
+/* new */
+static void ambx_light_write_ctrl_callback(struct urb *urb)
+{
+	struct usb_ambx_light *dev;
+
+	dev = urb->context;
+
+	/* sync/async unlink faults aren't errors */
+	if (urb->status) {
+		if (!(urb->status == -ENOENT ||
+		    urb->status == -ECONNRESET ||
+		    urb->status == -ESHUTDOWN))
+			dev_err(&dev->interface->dev,
+				"%s - nonzero write ctrl status received: %d\n",
 				__func__, urb->status);
 
 		spin_lock(&dev->err_lock);
@@ -426,12 +476,51 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 		goto error;
 	}
 
+#if 0
 	/* initialize the urb properly */
 	usb_fill_bulk_urb(urb, dev->udev,
 			  usb_sndbulkpipe(dev->udev, dev->bulk_out_endpointAddr),
 			  buf, writesize, ambx_light_write_bulk_callback, dev);
 	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	usb_anchor_urb(urb, &dev->submitted);
+#else
+
+#if 0
+	printk(KERN_INFO "buffsize = %d\n", writesize);
+	unsigned char setuppacket[8] = {0x21, 0x09, 0xa2, 0x03, 0x00, 0x00, 0x09, 0x00};
+	struct usb_ctrlrequest setup_packet = {
+		.bRequestType = 0x21,
+		.bRequest = 0x09,
+		.wValue = 0xa3,
+		.wIndex = 0x03,
+		.wLength = 0x09,
+	};
+#endif
+
+	/* initialize the urb properly */
+	dev->ctrl_dr = kmalloc(sizeof(struct usb_ctrlrequest), GFP_KERNEL);
+	if (!dev->ctrl_dr) {
+		retval = -ENOMEM;
+		goto error;
+	}
+	dev->ctrl_dr->bRequestType = 0x21;
+	dev->ctrl_dr->bRequest = 0x09;
+	dev->ctrl_dr->wValue = 0xa2;
+	dev->ctrl_dr->wIndex = 0x03;
+	dev->ctrl_dr->wLength = 0x09;
+
+
+	usb_fill_control_urb(urb, dev->udev,
+			  //usb_sndctrlpipe(dev->udev, dev->ctrl_endpointAddr),
+			  usb_sndctrlpipe(dev->udev, 0),
+			  (unsigned char*)dev->ctrl_dr,
+			  buf,
+			  writesize,
+			  ambx_light_write_ctrl_callback,
+			  dev);
+	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
+	//usb_anchor_urb(urb, &dev->submitted);
+#endif
 
 	/* send the data out the bulk port */
 	retval = usb_submit_urb(urb, GFP_KERNEL);
@@ -543,11 +632,33 @@ static int ambx_light_probe(struct usb_interface *interface,
 			dev->bulk_out_endpointAddr = endpoint->bEndpointAddress;
 		}
 	}
+#if 0
 	if (!(dev->bulk_in_endpointAddr && dev->bulk_out_endpointAddr)) {
 		dev_err(&interface->dev,
 			"Could not find both bulk-in and bulk-out endpoints\n");
 		goto error;
 	}
+#else
+	if (iface_desc->desc.bNumEndpoints == 1) {
+		endpoint = &iface_desc->endpoint[0].desc;
+		buffer_size = usb_endpoint_maxp(endpoint);
+		dev->ctrl_size = buffer_size;
+		dev->ctrl_endpointAddr = endpoint->bEndpointAddress;
+		dev->ctrl_buffer = kmalloc(buffer_size, GFP_KERNEL);
+		if (!dev->ctrl_buffer) {
+			dev_err(&interface->dev,
+					"Could not allocate ctrl_buffer\n");
+			goto error;
+		}
+		dev->ctrl_urb = usb_alloc_urb(0, GFP_KERNEL);
+		if (!dev->ctrl_urb) {
+			dev_err(&interface->dev,
+					"Could not allocate ctrl_urb\n");
+			goto error;
+		}
+	}
+
+#endif
 
 	/* save our data pointer in this interface device */
 	usb_set_intfdata(interface, dev);
@@ -607,6 +718,8 @@ static void ambx_light_draw_down(struct usb_ambx_light *dev)
 	if (!time)
 		usb_kill_anchored_urbs(&dev->submitted);
 	usb_kill_urb(dev->bulk_in_urb);
+	/* new */
+	usb_kill_urb(dev->ctrl_urb);
 }
 
 static int ambx_light_suspend(struct usb_interface *intf, pm_message_t message)
