@@ -1,3 +1,9 @@
+/*
+ * Cyborg amBX Gaming Light driver
+ *
+ * Copyright (C) 2014 Yuki Mizuno <u@mzyy94.com>
+ *
+ */
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -20,11 +26,11 @@ MODULE_LICENSE("GPL v3");
 static int __init ambxlight_init(void)
 {
 	if (attach_proc_entry(THIS_MODULE)) {
-		printk(KERN_ERR "create_proc_entry failed\n");
+		printk(KERN_ERR "ambxlight: [err] %s(%d) create_proc_entry failed\n", __FUNCTION__, __LINE__);
 		return -EBUSY;
 	}
 
-    printk(KERN_INFO "ambxlight is loaded\n");
+    printk(KERN_INFO "ambxlight: driver loaded\n");
     return 0;
 }
 
@@ -32,7 +38,7 @@ static int __init ambxlight_init(void)
 static void __exit ambxlight_exit(void)
 {
 	detach_proc_entry();
-    printk( KERN_INFO "ambxlight is removed\n" );
+    printk( KERN_INFO "ambxlight: driver removed\n" );
 }
 
 module_init(ambxlight_init);
