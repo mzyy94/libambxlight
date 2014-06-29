@@ -15,3 +15,7 @@ install:
 
 uninstall:
 		rmmod $(TARGET)
+
+reinstall:
+		rmmod $(TARGET)
+		insmod $(TARGET)
