@@ -12,7 +12,7 @@
 #include <linux/slab.h> 
 #endif
 
-#include "proc_light_color.h"
+#include "proc.h"
 
 #define MAXBUF 64
 static char modtest_buf[ MAXBUF ];

@@ -10,7 +10,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h> 
 
-#include "proc_light_color.h"
+#include "proc.h"
 
 MODULE_DESCRIPTION("ambxlight");
 MODULE_AUTHOR("Yuki Mizuno");

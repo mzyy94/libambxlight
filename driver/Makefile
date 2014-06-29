@@ -1,7 +1,7 @@
-TARGET := driver.ko
-obj-m := driver.o
+TARGET := ambxlight.ko
+obj-m := ambxlight.o
 
-driver-objs := ambxlight.o proc_light_color.o
+ambxlight-objs := core.o proc.o
 
 ROOTDIR  := /lib/modules/`uname -r`/build
 PWD   := $(shell pwd)
