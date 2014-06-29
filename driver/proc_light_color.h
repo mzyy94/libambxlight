@@ -4,6 +4,6 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 
-static ssize_t color_hex_write(struct file *filp, const char *buf, size_t len, loff_t *data);
-static ssize_t color_hex_read(struct file *filp, char *buf, size_t len, loff_t *data);
+int attach_proc_entry(struct module *this_module);
+int detach_proc_entry(void);
 #endif

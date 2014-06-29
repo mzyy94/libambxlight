@@ -1,9 +1,12 @@
-obj-m := ambxlight.o
+TARGET := driver.ko
+obj-m := driver.o
+
+driver-objs := ambxlight.o proc_light_color.o
 
 ROOTDIR  := /lib/modules/`uname -r`/build
 PWD   := $(shell pwd)
 
-all: ambxlight.c proc_light_color.c detect_ambxlight.c
+all:
 		$(MAKE) -C $(ROOTDIR) M=$(PWD) modules
 
 clean:
@@ -12,3 +15,5 @@ clean:
 install:
 		insmod $(TARGET)
 
+uninstall:
+		rmmod $(TARGET)
