@@ -244,6 +244,22 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 		goto error;
 	}
 
+	/* check the data have correct format */
+	if ((buf[0] & 0xff) == 0xa2) {
+		if (writesize != 9) {
+			retval = -EFAULT;
+			goto error;
+		}
+	} else if((buf[0] & 0xff) == 0xa1) {
+		if (writesize != 3) {
+			retval = -EFAULT;
+			goto error;
+		}
+	} else {
+		retval = -EFAULT;
+		goto error;
+	}
+
 	/* this lock makes sure we don't submit URBs to gone devices */
 	mutex_lock(&dev->io_mutex);
 	if (!dev->interface) {		/* disconnect() was called */
@@ -260,9 +276,9 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 	}
 	dev->ctrl_dr->bRequestType = 0x21;
 	dev->ctrl_dr->bRequest = 0x09;
-	dev->ctrl_dr->wValue = 0xa2;
+	dev->ctrl_dr->wValue = (buf[0] & 0xff);
 	dev->ctrl_dr->wIndex = 0x03;
-	dev->ctrl_dr->wLength = 0x09;
+	dev->ctrl_dr->wLength = writesize;
 
 
 	usb_fill_control_urb(urb, dev->udev,
