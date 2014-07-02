@@ -69,10 +69,10 @@ static void ambx_light_delete(struct kref *kref)
 {
 	struct usb_ambx_light *dev = to_ambx_light_dev(kref);
 
-	usb_free_urb(dev->ctrl_urb); /* new */
+	usb_free_urb(dev->ctrl_urb);
 	usb_put_dev(dev->udev);
-	kfree(dev->ctrl_buffer); /* new */
-	kfree(dev->ctrl_dr); /* new */
+	kfree(dev->ctrl_buffer);
+	kfree(dev->ctrl_dr);
 	kfree(dev);
 }
 
