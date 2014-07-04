@@ -162,6 +162,9 @@ static void ambx_light_write_ctrl_callback(struct urb *urb)
 
 	dev = urb->context;
 
+	if (urb->actual_length > 0) {
+		printk(KERN_INFO "length = %d\n", urb->actual_length);
+	}
 	/* sync/async unlink faults aren't errors */
 	if (urb->status) {
 		if (!(urb->status == -ENOENT ||
@@ -244,17 +247,28 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 		goto error;
 	}
 
+	unsigned char wValue;
+	unsigned char bRequest = 0x09;
+	unsigned int wLength = writesize;
 	/* check the data have correct format */
 	if ((buf[0] & 0xff) == 0xa2) {
 		if (writesize != 9) {
 			retval = -EFAULT;
 			goto error;
 		}
+		wValue = (buf[0] & 0xff);
 	} else if((buf[0] & 0xff) == 0xa1) {
 		if (writesize != 3) {
 			retval = -EFAULT;
 			goto error;
 		}
+		wValue = (buf[0] & 0xff);
+	} else if ((buf[0] & 0xff) == 0xb0) {
+		//writesize = 0;
+		wValue = (buf[0] & 0xff);
+		//buf[0] = 0;
+		bRequest = 0x01;
+		wLength = 0;
 	} else {
 		retval = -EFAULT;
 		goto error;
@@ -274,21 +288,40 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 		retval = -ENOMEM;
 		goto error;
 	}
-	dev->ctrl_dr->bRequestType = 0x21;
-	dev->ctrl_dr->bRequest = 0x09;
-	dev->ctrl_dr->wValue = (buf[0] & 0xff);
+	if (wValue == 0xb0 ) {
+	printk(KERN_INFO "ok\n");
+	dev->ctrl_dr->bRequestType = 0xa1;
+	dev->ctrl_dr->bRequest = 0x01;
+	dev->ctrl_dr->wValue = 0xb0;
 	dev->ctrl_dr->wIndex = 0x03;
-	dev->ctrl_dr->wLength = writesize;
+	dev->ctrl_dr->wLength = 0x0b;
+
+
+	usb_fill_control_urb(urb, dev->udev,
+			  usb_rcvctrlpipe(dev->udev, 0),
+			  (unsigned char*)dev->ctrl_dr,
+			  buf,
+			  11,
+			  ambx_light_write_ctrl_callback,
+			  dev);
+	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
+	} else {
+	dev->ctrl_dr->bRequestType = 0x21;
+	dev->ctrl_dr->bRequest = bRequest;
+	dev->ctrl_dr->wValue = wValue;
+	dev->ctrl_dr->wIndex = 0x03;
+	dev->ctrl_dr->wLength = wLength;
 
 
 	usb_fill_control_urb(urb, dev->udev,
 			  usb_sndctrlpipe(dev->udev, 0),
 			  (unsigned char*)dev->ctrl_dr,
 			  buf,
-			  writesize,
+			  wLength,
 			  ambx_light_write_ctrl_callback,
 			  dev);
 	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
+	}
 
 	/* send the data out the ctrl port */
 	retval = usb_submit_urb(urb, GFP_KERNEL);
