@@ -26,7 +26,7 @@ int main(int argc, char const* argv[])
 		fp = fopen("/dev/ambx_light0", "r");
 		char str[512];
 		fscanf(fp, "%s", str);
-		printf("%s\n", str);
+		printf("%x\n", str);
 		fclose(fp);
 		return 0;
 	}
