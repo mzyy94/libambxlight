@@ -19,6 +19,7 @@
 #include <linux/usb.h>
 #include <linux/mutex.h>
 
+#include "ambxlight_params.h"
 
 /* Define these values to match your devices */
 #define CYBORG_AMBX_LIGHT_VENDOR_ID	0x06a3
@@ -59,6 +60,7 @@ struct usb_ambx_light {
 	spinlock_t		err_lock;		/* lock for errors */
 	struct kref		kref;
 	struct mutex		io_mutex;		/* synchronize I/O with disconnect */
+	struct ambxlight_params params;		/* ambx device parameters */
 };
 #define to_ambx_light_dev(d) container_of(d, struct usb_ambx_light, kref)
 
@@ -154,6 +156,180 @@ static int ambx_light_flush(struct file *file, fl_owner_t id)
 	mutex_unlock(&dev->io_mutex);
 
 	return res;
+}
+
+static void ambx_light_read_ctrl_callback(struct urb *urb)
+{
+	struct usb_ambx_light *dev;
+
+	dev = urb->context;
+
+	if (urb->actual_length == 9) {
+		dev_info(&dev->interface->dev,
+		"load parameters: %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+			 ((char *)urb->transfer_buffer)[0] & 0xff, /* 0xb0 */
+			 ((char *)urb->transfer_buffer)[1] & 0xff,
+			 ((char *)urb->transfer_buffer)[2] & 0xff,
+			 ((char *)urb->transfer_buffer)[3] & 0xff,
+			 ((char *)urb->transfer_buffer)[4] & 0xff,
+			 ((char *)urb->transfer_buffer)[5] & 0xff,
+			 ((char *)urb->transfer_buffer)[6] & 0xff,
+			 ((char *)urb->transfer_buffer)[7] & 0xff,
+			 ((char *)urb->transfer_buffer)[8] & 0xff
+			 );
+		dev->params.location = ((char *)urb->transfer_buffer)[4] & 0xff;
+		dev->params.center = ((char *)urb->transfer_buffer)[5] & 0xff;
+		dev->params.height = ((char *)urb->transfer_buffer)[6] & 0xff;
+		dev->params.intensity = ((char *)urb->transfer_buffer)[7] & 0xff;
+		dev->params.enabled = ((char *)urb->transfer_buffer)[8] & 0xff;
+	}
+
+	/* sync/async unlink faults aren't errors */
+	if (urb->status) {
+		if (!(urb->status == -ENOENT ||
+		    urb->status == -ECONNRESET ||
+		    urb->status == -ESHUTDOWN))
+			dev_err(&dev->interface->dev,
+				"%s - nonzero write ctrl status received: %d\n",
+				__func__, urb->status);
+
+		spin_lock(&dev->err_lock);
+		dev->errors = urb->status;
+		spin_unlock(&dev->err_lock);
+	}
+
+	/* free up our allocated buffer */
+	usb_free_coherent(urb->dev, urb->transfer_buffer_length,
+			  urb->transfer_buffer, urb->transfer_dma);
+	up(&dev->limit_sem);
+}
+
+static ssize_t ambx_light_read(struct file *file, char *user_buffer,
+			  size_t count, loff_t *ppos)
+{
+	struct usb_ambx_light *dev;
+	static unsigned outbyte = 9;
+	unsigned char str[9];
+
+	dev = file->private_data;
+
+	str[0] = 0xb0; str[1] = 0x00; str[2] = 0x00; str[3] = 0x01;
+	str[4] = dev->params.location;
+	str[5] = dev->params.center;
+	str[6] = dev->params.height;
+	str[7] = dev->params.intensity;
+	str[8] = dev->params.enabled;
+	if( count > outbyte ) {
+		count = outbyte;
+	}
+	outbyte = outbyte - count;
+	if (copy_to_user(user_buffer, str, count)) return -EFAULT;
+	if (count == 0) {
+		outbyte = 9;
+	}
+	return count;
+
+}
+
+static ssize_t ambx_light_get_params(struct usb_ambx_light *dev)
+{
+	int retval = 0;
+	struct urb *urb = NULL;
+	char *buf = NULL;
+
+	/*
+	 * limit the number of URBs in flight to stop a user from using up all
+	 * RAM
+	 */
+	if (down_trylock(&dev->limit_sem)) {
+		retval = -EAGAIN;
+		goto exit;
+	}
+
+	spin_lock_irq(&dev->err_lock);
+	retval = dev->errors;
+	if (retval < 0) {
+		/* any error is reported once */
+		dev->errors = 0;
+		/* to preserve notifications about reset */
+		retval = (retval == -EPIPE) ? retval : -EIO;
+	}
+	spin_unlock_irq(&dev->err_lock);
+	if (retval < 0)
+		goto error;
+
+	/* create a urb, and a buffer for it, and copy the data to the urb */
+	urb = usb_alloc_urb(0, GFP_KERNEL);
+	if (!urb) {
+		retval = -ENOMEM;
+		goto error;
+	}
+
+	buf = usb_alloc_coherent(dev->udev, 11, GFP_KERNEL,
+				 &urb->transfer_dma);
+	if (!buf) {
+		retval = -ENOMEM;
+		goto error;
+	}
+
+	/* this lock makes sure we don't submit URBs to gone devices */
+	mutex_lock(&dev->io_mutex);
+	if (!dev->interface) {		/* disconnect() was called */
+		mutex_unlock(&dev->io_mutex);
+		retval = -ENODEV;
+		goto error;
+	}
+
+	/* initialize the urb properly */
+	dev->ctrl_dr = kmalloc(sizeof(struct usb_ctrlrequest), GFP_KERNEL);
+	if (!dev->ctrl_dr) {
+		retval = -ENOMEM;
+		goto error;
+	}
+	dev->ctrl_dr->bRequestType = 0xa1;
+	dev->ctrl_dr->bRequest = 0x01;
+	dev->ctrl_dr->wValue = 0x0b;
+	dev->ctrl_dr->wIndex = 0x03;
+	dev->ctrl_dr->wLength = 0x0b;
+
+	usb_fill_control_urb(urb, dev->udev,
+			  usb_rcvctrlpipe(dev->udev, 0),
+			  (unsigned char*)dev->ctrl_dr,
+			  buf,
+			  11,
+			  ambx_light_read_ctrl_callback,
+			  dev);
+	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
+
+	/* send the data out the ctrl port */
+	retval = usb_submit_urb(urb, GFP_KERNEL);
+	mutex_unlock(&dev->io_mutex);
+	if (retval) {
+		dev_err(&dev->interface->dev,
+			"%s - failed submitting write urb, error %d\n",
+			__func__, retval);
+		goto error_unanchor;
+	}
+
+	/*
+	 * release our reference to this urb, the USB core will eventually free
+	 * it entirely
+	 */
+	usb_free_urb(urb);
+
+	return 0;
+
+error_unanchor:
+	usb_unanchor_urb(urb);
+error:
+	if (urb) {
+		usb_free_coherent(dev->udev, 11, buf, urb->transfer_dma);
+		usb_free_urb(urb);
+	}
+	up(&dev->limit_sem);
+
+exit:
+	return retval;
 }
 
 static void ambx_light_write_ctrl_callback(struct urb *urb)
@@ -324,7 +500,7 @@ exit:
 
 static const struct file_operations ambx_light_fops = {
 	.owner =	THIS_MODULE,
-	.read =		NULL,
+	.read =		ambx_light_read,
 	.write =	ambx_light_write,
 	.open =		ambx_light_open,
 	.release =	ambx_light_release,
@@ -406,6 +582,8 @@ static int ambx_light_probe(struct usb_interface *interface,
 	dev_info(&interface->dev,
 		 "Cyborg amBX Light Pods device now attached to amBXLight-%d",
 		 interface->minor);
+
+	ambx_light_get_params(dev);
 	return 0;
 
 error:
