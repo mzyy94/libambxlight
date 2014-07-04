@@ -23,9 +23,10 @@ int main(int argc, char const* argv[])
 		return 0;
 	}
 	if (argc == 4) {
-		fp = fopen("/dev/ambx_light0", "w");
-		fprintf(fp, "%c0123456789", 0xb0);
-		fflush(fp);
+		fp = fopen("/dev/ambx_light0", "r");
+		char str[512];
+		fscanf(fp, "%s", str);
+		printf("%s\n", str);
 		fclose(fp);
 		return 0;
 	}
