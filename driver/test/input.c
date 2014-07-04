@@ -24,7 +24,7 @@ int main(int argc, char const* argv[])
 	}
 	if (argc == 4) {
 		fp = fopen("/dev/ambx_light0", "w");
-		fprintf(fp, "%c0000000000", 0xb0);
+		fprintf(fp, "%c0123456789", 0xb0);
 		fflush(fp);
 		fclose(fp);
 		return 0;

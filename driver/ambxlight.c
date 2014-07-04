@@ -164,6 +164,13 @@ static void ambx_light_write_ctrl_callback(struct urb *urb)
 
 	if (urb->actual_length > 0) {
 		printk(KERN_INFO "length = %d\n", urb->actual_length);
+		printk(KERN_INFO "%02x %02x %02x %02x",
+			 ((char *)urb->transfer_buffer)[0],
+			 ((char *)urb->transfer_buffer)[1],
+			 ((char *)urb->transfer_buffer)[2],
+			 ((char *)urb->transfer_buffer)[3]
+			  );
+		printk(KERN_INFO "transf = %d\n", urb->transfer_buffer_length);
 	}
 	/* sync/async unlink faults aren't errors */
 	if (urb->status) {
