@@ -420,20 +420,64 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 		goto error;
 	}
 
-	/* check the data have correct format */
-	if ((buf[0] & 0xff) == 0xa2) {
-		if (writesize != 9) {
-			retval = -EFAULT;
-			goto error;
-		}
-	} else if((buf[0] & 0xff) == 0xa1) {
-		if (writesize != 3) {
-			retval = -EFAULT;
-			goto error;
-		}
-	} else {
+	/*
+	 * urb data packet format
+	 *
+	 * |  00  |  01  |  02  | 03.. |
+	 * |OPCODE| 0x00 |  values...  |
+	 *
+	 */
+
+	/* check the data format */
+	if (writesize < 2 || (buf[1] && 0xff) != 0x00) {
 		retval = -EFAULT;
 		goto error;
+	}
+
+	/* check the data size */
+	switch (buf[0] & 0xff) {
+		case 0x01: /* set device state */
+			if (writesize != 3) {
+				retval = -EFAULT;
+				goto error;
+			}
+			break;
+		case 0xa2: /* chenge light color */
+			if (writesize != 9) {
+				retval = -EFAULT;
+				goto error;
+			}
+			break;
+		case 0x03:
+			/* unknown */
+			break;
+		case 0x04: /* set location */
+			if (writesize != 4) {
+				retval = -EFAULT;
+				goto error;
+			}
+			break;
+		case 0x05: /* set height */
+			if (writesize != 3) {
+				retval = -EFAULT;
+				goto error;
+			}
+			break;
+		case 0x06: /* set intensity */
+			if (writesize != 3) {
+				retval = -EFAULT;
+				goto error;
+			}
+			break;
+		case 0x07: /* initialization? */
+			if (writesize != 2) {
+				retval = -EFAULT;
+				goto error;
+			}
+			break;
+		default:
+			retval = -EFAULT;
+			goto error;
 	}
 
 	/* this lock makes sure we don't submit URBs to gone devices */
