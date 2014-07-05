@@ -18,12 +18,19 @@
 #define HEIGHT_MIDDLE 0x04
 #define HEIGHT_HIGH 0x02
 
-struct ambxlight_params {
-	unsigned char enabled;	/* 0x01 || 0x00 */
-	unsigned char location;
-	unsigned char center;	/* 0x01 || 0x00 */
-	unsigned char height;
-	unsigned char intensity;
+union ambxlight_params {
+	unsigned char raw[9];
+	struct {
+		unsigned char opcode; /* 0x0b */
+		unsigned char p1; /* unknown */
+		unsigned char p2; /* unknown */
+		unsigned char p3; /* unknown || 0x01 */
+		unsigned char location;
+		unsigned char center;	/* 0x01 || 0x00 */
+		unsigned char height;
+		unsigned char intensity;
+		unsigned char enabled;	/* 0x01 || 0x00 */
+	} param;
 };
 
 

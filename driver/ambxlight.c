@@ -65,7 +65,7 @@ struct usb_ambx_light {
 	spinlock_t		err_lock;		/* lock for errors */
 	struct kref		kref;
 	struct mutex		io_mutex;		/* synchronize I/O with disconnect */
-	struct ambxlight_params params;		/* ambx device parameters */
+	union ambxlight_params params;		/* ambx device parameters */
 	unsigned char	transfer_mode;		/* transfer mode configured by ioctl */
 };
 #define to_ambx_light_dev(d) container_of(d, struct usb_ambx_light, kref)
@@ -171,6 +171,7 @@ static void ambx_light_read_ctrl_callback(struct urb *urb)
 	dev = urb->context;
 
 	if (urb->actual_length == 9) {
+		unsigned char i;
 		dev_info(&dev->interface->dev,
 		"load parameters: %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
 			 ((char *)urb->transfer_buffer)[0] & 0xff, /* 0xb0 */
@@ -183,11 +184,9 @@ static void ambx_light_read_ctrl_callback(struct urb *urb)
 			 ((char *)urb->transfer_buffer)[7] & 0xff,
 			 ((char *)urb->transfer_buffer)[8] & 0xff
 			 );
-		dev->params.location = ((char *)urb->transfer_buffer)[4] & 0xff;
-		dev->params.center = ((char *)urb->transfer_buffer)[5] & 0xff;
-		dev->params.height = ((char *)urb->transfer_buffer)[6] & 0xff;
-		dev->params.intensity = ((char *)urb->transfer_buffer)[7] & 0xff;
-		dev->params.enabled = ((char *)urb->transfer_buffer)[8] & 0xff;
+		for (i = 0; i < urb->actual_length; i++) {
+			dev->params.raw[i] = ((char *)urb->transfer_buffer)[i] & 0xff;
+		}
 	}
 
 	/* sync/async unlink faults aren't errors */
@@ -215,16 +214,11 @@ static ssize_t ambx_light_read(struct file *file, char *user_buffer,
 {
 	struct usb_ambx_light *dev;
 	static unsigned outbyte = 9;
-	unsigned char str[9];
+	unsigned char *str;
 
 	dev = file->private_data;
+	str = dev->params.raw;
 
-	str[0] = 0xb0; str[1] = 0x00; str[2] = 0x00; str[3] = 0x01;
-	str[4] = dev->params.location;
-	str[5] = dev->params.center;
-	str[6] = dev->params.height;
-	str[7] = dev->params.intensity;
-	str[8] = dev->params.enabled;
 	if( count > outbyte ) {
 		count = outbyte;
 	}
