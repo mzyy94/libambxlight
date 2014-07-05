@@ -20,6 +20,11 @@
 #include <linux/mutex.h>
 
 #include "ambxlight_params.h"
+#include "ambxlight_ioctl.h"
+
+/* Define transfer mode */
+#define AMBXLIGHT_MODE_RAW	0x01
+#define AMBXLIGHT_MODE_COLOR	0x02
 
 /* Define these values to match your devices */
 #define CYBORG_AMBX_LIGHT_VENDOR_ID	0x06a3
@@ -61,6 +66,7 @@ struct usb_ambx_light {
 	struct kref		kref;
 	struct mutex		io_mutex;		/* synchronize I/O with disconnect */
 	struct ambxlight_params params;		/* ambx device parameters */
+	unsigned char	transfer_mode;		/* transfer mode configured by ioctl */
 };
 #define to_ambx_light_dev(d) container_of(d, struct usb_ambx_light, kref)
 
@@ -365,7 +371,9 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 	int retval = 0;
 	struct urb *urb = NULL;
 	char *buf = NULL;
+	char *userdata = NULL;
 	size_t writesize = min(count, (size_t)MAX_TRANSFER);
+	int retlen = writesize;
 
 	dev = file->private_data;
 
@@ -408,66 +416,97 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 		goto error;
 	}
 
-	buf = usb_alloc_coherent(dev->udev, writesize, GFP_KERNEL,
+	userdata = usb_alloc_coherent(dev->udev, writesize, GFP_KERNEL,
 				 &urb->transfer_dma);
-	if (!buf) {
+	if (!userdata) {
 		retval = -ENOMEM;
 		goto error;
 	}
 
-	if (copy_from_user(buf, user_buffer, writesize)) {
+	if (copy_from_user(userdata, user_buffer, writesize)) {
 		retval = -EFAULT;
 		goto error;
 	}
 
-	/*
-	 * urb data packet format
-	 *
-	 * |  00  |  01  |  02  | 03.. |
-	 * |OPCODE| 0x00 |  values...  |
-	 *
-	 */
-
-	/* check the data format */
-	if (writesize < 2 || (buf[1] && 0xff) != 0x00) {
-		retval = -EFAULT;
-		goto error;
-	}
-
-	/* check the data size */
-	switch (buf[0] & 0xff) {
-		case 0x01: /* set device state */
-		case 0x05: /* set height */
-		case 0x06: /* set intensity */
+	switch (dev->transfer_mode) {
+		case AMBXLIGHT_MODE_COLOR:
+			/* check data format */
 			if (writesize != 3) {
 				retval = -EFAULT;
 				goto error;
 			}
-			break;
-		case 0xa2: /* chenge light color */
-			if (writesize != 9) {
-				retval = -EFAULT;
+			writesize = 9;
+			buf = usb_alloc_coherent(dev->udev, writesize, GFP_KERNEL,
+					&urb->transfer_dma);
+			if (!buf) {
+				retval = -ENOMEM;
 				goto error;
 			}
-			break;
-		case 0x03:
-			/* unknown */
-			break;
-		case 0x04: /* set location */
-			if (writesize != 4) {
-				retval = -EFAULT;
-				goto error;
-			}
-			break;
-		case 0x07: /* initialization? */
-			if (writesize != 2) {
-				retval = -EFAULT;
-				goto error;
-			}
+			((char *)buf)[0] = 0xa2;
+			((char *)buf)[1] = 0x00;
+			((char *)buf)[2] = userdata[0] & 0xff;
+			((char *)buf)[3] = userdata[1] & 0xff;
+			((char *)buf)[4] = userdata[2] & 0xff;
+			((char *)buf)[5] = 0x00;
+			((char *)buf)[6] = 0x00;
+			((char *)buf)[7] = 0x00;
+			((char *)buf)[8] = 0x00;
+
 			break;
 		default:
-			retval = -EFAULT;
-			goto error;
+			dev->transfer_mode = AMBXLIGHT_MODE_RAW;
+		case AMBXLIGHT_MODE_RAW:
+			/*
+			 * urb data packet format
+			 *
+			 * |  00  |  01  |  02  | 03.. |
+			 * |OPCODE| 0x00 |  values...  |
+			 *
+			 */
+			buf = userdata;
+
+			/* check data format */
+			if (writesize < 2 || (buf[1] && 0xff) != 0x00) {
+				retval = -EFAULT;
+				goto error;
+			}
+
+			/* check data size */
+			switch (buf[0] & 0xff) {
+				case 0x01: /* set device state */
+				case 0x05: /* set height */
+				case 0x06: /* set intensity */
+					if (writesize != 3) {
+						retval = -EFAULT;
+						goto error;
+					}
+					break;
+				case 0xa2: /* chenge light color */
+					if (writesize != 9) {
+						retval = -EFAULT;
+						goto error;
+					}
+					break;
+				case 0x03:
+					/* unknown */
+					break;
+				case 0x04: /* set location */
+					if (writesize != 4) {
+						retval = -EFAULT;
+						goto error;
+					}
+					break;
+				case 0x07: /* initialization? */
+					if (writesize != 2) {
+						retval = -EFAULT;
+						goto error;
+					}
+					break;
+				default:
+					retval = -EFAULT;
+					goto error;
+			}
+			break;
 	}
 
 	/* this lock makes sure we don't submit URBs to gone devices */
@@ -517,7 +556,7 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 	usb_free_urb(urb);
 
 
-	return writesize;
+	return retlen;
 
 error_unanchor:
 	usb_unanchor_urb(urb);
@@ -532,11 +571,44 @@ exit:
 	return retval;
 }
 
+static long ambx_light_ioctl(struct file *file, unsigned int cmd,
+			  unsigned long arg)
+{
+	struct usb_ambx_light *dev;
+	int retval = 0;
+	unsigned char mode;
+
+	dev = file->private_data;
+
+	spin_lock_irq(&dev->err_lock);
+	switch (cmd) {
+		case AMBXLIGHT_IOCTL_SET:
+			if (copy_from_user(&mode, (const char *)arg, sizeof(mode))) {
+				retval = -EFAULT;
+				break;
+			}
+			dev->transfer_mode = mode;
+			break;
+		case AMBXLIGHT_IOCTL_GET:
+			retval = copy_to_user((char *)arg, &dev->transfer_mode, sizeof(dev->transfer_mode));
+			break;
+		default:
+			dev->transfer_mode = AMBXLIGHT_MODE_RAW;
+			retval =  -ENOIOCTLCMD;
+	}
+	spin_unlock_irq(&dev->err_lock);
+	return retval;
+}
+
 static const struct file_operations ambx_light_fops = {
 	.owner =	THIS_MODULE,
 	.read =		ambx_light_read,
 	.write =	ambx_light_write,
 	.open =		ambx_light_open,
+	.unlocked_ioctl =	ambx_light_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl =	ambx_light_ioctl,
+#endif
 	.release =	ambx_light_release,
 	.flush =	ambx_light_flush,
 	.llseek =	noop_llseek,
