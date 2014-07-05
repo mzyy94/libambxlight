@@ -332,6 +332,8 @@ exit:
 	return retval;
 }
 
+static ssize_t ambx_light_pre_get_params(struct usb_ambx_light *dev);
+
 static void ambx_light_write_ctrl_callback(struct urb *urb)
 {
 	struct usb_ambx_light *dev;
@@ -356,6 +358,13 @@ static void ambx_light_write_ctrl_callback(struct urb *urb)
 	usb_free_coherent(urb->dev, urb->transfer_buffer_length,
 			  urb->transfer_buffer, urb->transfer_dma);
 	up(&dev->limit_sem);
+
+	if (urb->actual_length == 2) {
+		ambx_light_get_params(dev);
+	} else if (urb->actual_length > 2 && urb->actual_length < 5) {
+		ambx_light_pre_get_params(dev);
+	}
+
 }
 
 static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
@@ -490,7 +499,7 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 						goto error;
 					}
 					break;
-				case 0xa7: /* initialization? */
+				case 0xa7: /* prepare read parameters */
 					if (writesize != 2) {
 						retval = -EFAULT;
 						goto error;
@@ -551,6 +560,111 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 
 
 	return retlen;
+
+error_unanchor:
+	usb_unanchor_urb(urb);
+error:
+	if (urb) {
+		usb_free_coherent(dev->udev, writesize, buf, urb->transfer_dma);
+		usb_free_urb(urb);
+	}
+	up(&dev->limit_sem);
+
+exit:
+	return retval;
+}
+
+static ssize_t ambx_light_pre_get_params(struct usb_ambx_light *dev)
+{
+	int retval = 0;
+	struct urb *urb = NULL;
+	char *buf = NULL;
+	size_t writesize = 2;
+
+	/*
+	 * limit the number of URBs in flight to stop a user from using up all
+	 * RAM
+	 */
+	if (down_trylock(&dev->limit_sem)) {
+		retval = -EAGAIN;
+		goto exit;
+	}
+
+	spin_lock_irq(&dev->err_lock);
+	retval = dev->errors;
+	if (retval < 0) {
+		/* any error is reported once */
+		dev->errors = 0;
+		/* to preserve notifications about reset */
+		retval = (retval == -EPIPE) ? retval : -EIO;
+	}
+	spin_unlock_irq(&dev->err_lock);
+	if (retval < 0)
+		goto error;
+
+	/* create a urb, and a buffer for it, and copy the data to the urb */
+	urb = usb_alloc_urb(0, GFP_KERNEL);
+	if (!urb) {
+		retval = -ENOMEM;
+		goto error;
+	}
+
+	buf = usb_alloc_coherent(dev->udev, writesize, GFP_KERNEL,
+			&urb->transfer_dma);
+	if (!buf) {
+		retval = -ENOMEM;
+		goto error;
+	}
+	((char *)buf)[0] = 0xa7;
+	((char *)buf)[1] = 0x00;
+
+	/* this lock makes sure we don't submit URBs to gone devices */
+	mutex_lock(&dev->io_mutex);
+	if (!dev->interface) {		/* disconnect() was called */
+		mutex_unlock(&dev->io_mutex);
+		retval = -ENODEV;
+		goto error;
+	}
+
+	/* initialize the urb properly */
+	dev->ctrl_dr = kmalloc(sizeof(struct usb_ctrlrequest), GFP_KERNEL);
+	if (!dev->ctrl_dr) {
+		retval = -ENOMEM;
+		goto error;
+	}
+	dev->ctrl_dr->bRequestType = 0x21;
+	dev->ctrl_dr->bRequest = 0x09;
+	dev->ctrl_dr->wValue = (buf[0] & 0xff);
+	dev->ctrl_dr->wIndex = 0x03;
+	dev->ctrl_dr->wLength = writesize;
+
+	usb_fill_control_urb(urb, dev->udev,
+			  usb_sndctrlpipe(dev->udev, 0),
+			  (unsigned char*)dev->ctrl_dr,
+			  buf,
+			  writesize,
+			  ambx_light_write_ctrl_callback,
+			  dev);
+	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
+
+	/* send the data out the ctrl port */
+	retval = usb_submit_urb(urb, GFP_KERNEL);
+	mutex_unlock(&dev->io_mutex);
+	if (retval) {
+		dev_err(&dev->interface->dev,
+			"%s - failed submitting write urb, error %d\n",
+			__func__, retval);
+		goto error_unanchor;
+	}
+
+	/*
+	 * release our reference to this urb, the USB core will eventually free
+	 * it entirely
+	 */
+	usb_free_urb(urb);
+
+
+	return writesize;
 
 error_unanchor:
 	usb_unanchor_urb(urb);
@@ -683,7 +797,7 @@ static int ambx_light_probe(struct usb_interface *interface,
 		 "Cyborg amBX Light Pods device now attached to amBXLight-%d",
 		 interface->minor);
 
-	ambx_light_get_params(dev);
+	ambx_light_pre_get_params(dev);
 	return 0;
 
 error:
