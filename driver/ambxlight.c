@@ -19,8 +19,8 @@
 #include <linux/usb.h>
 #include <linux/mutex.h>
 
-#include "ambxlight_params.h"
-#include "ambxlight_ioctl.h"
+#include "../include/ambxlight_params.h"
+#include "../include/ambxlight_ioctl.h"
 
 /* Define transfer mode */
 #define AMBXLIGHT_MODE_RAW	0x01
