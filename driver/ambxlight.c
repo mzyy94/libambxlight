@@ -473,9 +473,9 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 
 			/* check data size */
 			switch (buf[0] & 0xff) {
-				case 0x01: /* set device state */
-				case 0x05: /* set height */
-				case 0x06: /* set intensity */
+				case 0xa1: /* set device state */
+				case 0xa5: /* set height */
+				case 0xa6: /* set intensity */
 					if (writesize != 3) {
 						retval = -EFAULT;
 						goto error;
@@ -487,16 +487,16 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 						goto error;
 					}
 					break;
-				case 0x03:
+				case 0xa3:
 					/* unknown */
 					break;
-				case 0x04: /* set location */
+				case 0xa4: /* set location */
 					if (writesize != 4) {
 						retval = -EFAULT;
 						goto error;
 					}
 					break;
-				case 0x07: /* initialization? */
+				case 0xa7: /* initialization? */
 					if (writesize != 2) {
 						retval = -EFAULT;
 						goto error;
