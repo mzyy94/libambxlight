@@ -22,11 +22,6 @@
 #include "../include/ambxlight_params.h"
 #include "../include/ambxlight_ioctl.h"
 
-/* Define transfer mode */
-#define AMBXLIGHT_MODE_RAW	0x01
-#define AMBXLIGHT_MODE_COLOR	0x02
-#define AMBXLIGHT_MODE_HEXSTRING	0x04
-
 /* Define these values to match your devices */
 #define CYBORG_AMBX_LIGHT_VENDOR_ID	0x06a3
 #define CYBORG_AMBX_LIGHT_PRODUCT_ID	0x0dc5
