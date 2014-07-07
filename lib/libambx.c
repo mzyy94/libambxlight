@@ -25,11 +25,17 @@ int __check_device_access(const char* name) {
 int ambx_device_open(int index) {
 	char name[20];
 	int retval;
+	int fd;
 	sprintf(name, "/dev/ambx_light%d", index);
 	if ((retval = __check_device_access(name)) < 0) {
 		return retval;
 	}
-	return open(name, O_RDWR);
+	fd = open(name, O_RDWR);
+	if (fd > 1) {
+		unsigned char mode = AMBXLIGHT_MODE_RAW;
+		ioctl(fd, AMBXLIGHT_IOCTL_SET, &mode);
+	}
+	return fd;
 }
 
 int ambx_device_open_all(int *file_discriptors, int max_devices) {
@@ -54,16 +60,18 @@ int ambx_device_close_all(int *file_discriptors, int devices) {
 }
 
 int ambx_device_close(int file_discriptor) {
+	unsigned char mode = AMBXLIGHT_MODE_HEXSTRING;
+	ioctl(file_discriptor, AMBXLIGHT_IOCTL_SET, &mode);
 	return close(file_discriptor);
 }
 
 int ambx_start_color_mode(int file_discriptor) {
-	unsigned char mode = 0x02;
+	unsigned char mode = AMBXLIGHT_MODE_COLOR;
 	return ioctl(file_discriptor, AMBXLIGHT_IOCTL_SET, &mode);
 }
 
 int ambx_end_color_mode(int file_discriptor) {
-	unsigned char mode = 0x01;
+	unsigned char mode = AMBXLIGHT_MODE_RAW;
 	return ioctl(file_discriptor, AMBXLIGHT_IOCTL_SET, &mode);
 }
 
