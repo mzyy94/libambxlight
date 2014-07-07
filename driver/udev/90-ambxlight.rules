@@ -1,0 +1,6 @@
+# This file is a rule for amBM gaming lights.
+#
+
+DRIVERS=="cyborg_ambx_light", MODE="0666", OPTIONS="last_rule"
+DRIVERS=="usb", ATTRS{idVendor}=="06a3", ATTRS{idProduct}=="0dc5", MODE="0666"
+
