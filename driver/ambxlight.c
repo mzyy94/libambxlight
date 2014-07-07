@@ -241,8 +241,8 @@ static ssize_t ambx_light_get_params(struct usb_ambx_light *dev)
 	 * limit the number of URBs in flight to stop a user from using up all
 	 * RAM
 	 */
-	if (down_trylock(&dev->limit_sem)) {
-		retval = -EAGAIN;
+	if (down_interruptible(&dev->limit_sem)) {
+		retval = -ERESTARTSYS;
 		goto exit;
 	}
 
@@ -585,8 +585,8 @@ static ssize_t ambx_light_pre_get_params(struct usb_ambx_light *dev)
 	 * limit the number of URBs in flight to stop a user from using up all
 	 * RAM
 	 */
-	if (down_trylock(&dev->limit_sem)) {
-		retval = -EAGAIN;
+	if (down_interruptible(&dev->limit_sem)) {
+		retval = -ERESTARTSYS;
 		goto exit;
 	}
 
