@@ -25,6 +25,7 @@
 /* Define transfer mode */
 #define AMBXLIGHT_MODE_RAW	0x01
 #define AMBXLIGHT_MODE_COLOR	0x02
+#define AMBXLIGHT_MODE_HEXSTRING	0x04
 
 /* Define these values to match your devices */
 #define CYBORG_AMBX_LIGHT_VENDOR_ID	0x06a3
@@ -432,6 +433,28 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 	}
 
 	switch (dev->transfer_mode) {
+		unsigned char i;
+		default:
+			dev->transfer_mode = AMBXLIGHT_MODE_HEXSTRING;
+		case AMBXLIGHT_MODE_HEXSTRING:
+			if (writesize != 6 && writesize != 7) { /* hex string + line break */
+				retval = -EFAULT;
+				goto error;
+			}
+			for (i = 0; i < 6; i++) {
+				if (userdata[i] >= '0' && userdata[i] <= '9') {
+					userdata[i] -= '0';
+				} else if (userdata[i] >= 'a' && userdata[i] <= 'f') {
+					userdata[i] -= 'a' - 10;
+				} else if (userdata[i] >= 'A' && userdata[i] <= 'F') {
+					userdata[i] -= 'A' - 10;
+				} else {
+					retval = -EFAULT;
+					goto error;
+				}
+				userdata[i/2] = i % 2 ? userdata[i/2] | userdata[i] : userdata[i] << 4;
+			}
+			writesize = 3;
 		case AMBXLIGHT_MODE_COLOR:
 			/* check data format */
 			if (writesize != 3) {
@@ -456,8 +479,6 @@ static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
 			((char *)buf)[8] = 0x00;
 
 			break;
-		default:
-			dev->transfer_mode = AMBXLIGHT_MODE_RAW;
 		case AMBXLIGHT_MODE_RAW:
 			/*
 			 * urb data packet format
