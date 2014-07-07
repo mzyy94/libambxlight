@@ -22,7 +22,7 @@ int __check_device_access(const char* name) {
 	return 0;
 }
 
-int ambx_device_open(int index) {
+int ambxlight_device_open(int index) {
 	char name[20];
 	int retval;
 	int fd;
@@ -38,12 +38,12 @@ int ambx_device_open(int index) {
 	return fd;
 }
 
-int ambx_device_open_all(int *file_discriptors, int max_devices) {
+int ambxlight_device_open_all(int *file_discriptors, int max_devices) {
 	unsigned int i;
 	unsigned int index = 0;
 	int fd;
 	for (i = 0; i < max_devices; i++) {
-		fd = ambx_device_open(i);
+		fd = ambxlight_device_open(i);
 		if (fd > 0) {
 			file_discriptors[index++] = fd;
 		}
@@ -51,7 +51,7 @@ int ambx_device_open_all(int *file_discriptors, int max_devices) {
 	return index;
 }
 
-int ambx_device_close_all(int *file_discriptors, int devices) {
+int ambxlight_device_close_all(int *file_discriptors, int devices) {
 	unsigned int i;
 	for (i = 0; i < devices; i++) {
 		close(file_discriptors[i]);
@@ -59,27 +59,27 @@ int ambx_device_close_all(int *file_discriptors, int devices) {
 	return 0;
 }
 
-int ambx_device_close(int file_discriptor) {
+int ambxlight_device_close(int file_discriptor) {
 	unsigned char mode = AMBXLIGHT_MODE_HEXSTRING;
 	ioctl(file_discriptor, AMBXLIGHT_IOCTL_SET, &mode);
 	return close(file_discriptor);
 }
 
-int ambx_start_color_mode(int file_discriptor) {
+int ambxlight_start_color_mode(int file_discriptor) {
 	unsigned char mode = AMBXLIGHT_MODE_COLOR;
 	return ioctl(file_discriptor, AMBXLIGHT_IOCTL_SET, &mode);
 }
 
-int ambx_end_color_mode(int file_discriptor) {
+int ambxlight_end_color_mode(int file_discriptor) {
 	unsigned char mode = AMBXLIGHT_MODE_RAW;
 	return ioctl(file_discriptor, AMBXLIGHT_IOCTL_SET, &mode);
 }
 
-int ambx_write_color_boost(int file_discriptor, unsigned char *color) {
+int ambxlight_write_color_boost(int file_discriptor, unsigned char *color) {
 	return write(file_discriptor, color, 3);
 }
 
-int ambx_change_color_with_fade(int file_discriptor, unsigned char* color, unsigned int speed) {
+int ambxlight_change_color_with_fade(int file_discriptor, unsigned char* color, unsigned int speed) {
 	unsigned char data[9] = {
 		0xa2,
 		0x00,
@@ -94,7 +94,7 @@ int ambx_change_color_with_fade(int file_discriptor, unsigned char* color, unsig
 	return write(file_discriptor, data, sizeof(data));
 }
 
-int ambx_set_state(int file_discriptor, unsigned char state) {
+int ambxlight_set_state(int file_discriptor, unsigned char state) {
 	unsigned char data[3] = {
 		0xa1,
 		0x00,
@@ -103,7 +103,7 @@ int ambx_set_state(int file_discriptor, unsigned char state) {
 	return write(file_discriptor, data, sizeof(data));
 }
 
-int ambx_set_intensity(int file_discriptor, unsigned char intensity) {
+int ambxlight_set_intensity(int file_discriptor, unsigned char intensity) {
 	unsigned char data[3] = {
 		0xa6,
 		0x00,
@@ -112,7 +112,7 @@ int ambx_set_intensity(int file_discriptor, unsigned char intensity) {
 	return write(file_discriptor, data, sizeof(data));
 }
 
-int ambx_set_height(int file_discriptor, unsigned char height) {
+int ambxlight_set_height(int file_discriptor, unsigned char height) {
 	unsigned char data[3] = {
 		0xa5,
 		0x00,
@@ -121,7 +121,7 @@ int ambx_set_height(int file_discriptor, unsigned char height) {
 	return write(file_discriptor, data, sizeof(data));
 }
 
-int ambx_set_location(int file_discriptor, unsigned char location) {
+int ambxlight_set_location(int file_discriptor, unsigned char location) {
 	unsigned char data[4] = {
 		0xa4,
 		0x00,
@@ -131,6 +131,6 @@ int ambx_set_location(int file_discriptor, unsigned char location) {
 	return write(file_discriptor, data, sizeof(data));
 }
 
-int ambx_get_params(int file_discriptor, union ambxlight_params* params) {
+int ambxlight_get_params(int file_discriptor, union ambxlight_params* params) {
 	return read(file_discriptor, params, sizeof(params));
 }
