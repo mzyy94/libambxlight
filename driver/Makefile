@@ -11,11 +11,7 @@ clean:
 		$(MAKE) -C $(ROOTDIR) M=$(PWD) clean
 
 install:
-		insmod $(TARGET)
-
-uninstall:
-		rmmod $(TARGET)
-
-reinstall:
-		rmmod $(TARGET)
-		insmod $(TARGET)
+		cp $(TARGET) /lib/modules/`uname -r`/kernel/drivers/usb/misc
+		/sbin/depmod -a `uname -r`
+		cp $(PWD)/udev/90-ambxlight.rules /etc/udev/rules.d/
+		service udev restart
