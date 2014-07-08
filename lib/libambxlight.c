@@ -166,5 +166,6 @@ int ambxlight_device_close_all(struct ambxlight_device *devices, size_t size) {
 	for (i = 0; i < size; i++) {
 		ambxlight_device_close(devices[i]);
 	}
+	free(devices);
 	return 0;
 }
