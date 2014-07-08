@@ -19,8 +19,8 @@
 #include <linux/usb.h>
 #include <linux/mutex.h>
 
-#include "../include/ambxlight_params.h"
-#include "../include/ambxlight_ioctl.h"
+#include "../include/libambxlight/ambxlight_params.h"
+#include "../include/libambxlight/ambxlight_ioctl.h"
 
 /* Define these values to match your devices */
 #define CYBORG_AMBX_LIGHT_VENDOR_ID	0x06a3

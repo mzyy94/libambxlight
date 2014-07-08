@@ -5,9 +5,9 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 
-#include "../include/ambxlight_ioctl.h"
-#include "../include/ambxlight_params.h"
-#include "../include/ambxlight_device.h"
+#include <libambxlight/ambxlight_ioctl.h>
+#include <libambxlight/ambxlight_params.h>
+#include <libambxlight/ambxlight_device.h>
 
 #define MODE_CHANGE_REQUIRED 0x04
 #define CHECK_AMBXLIGHT_MODE_COLOR(mode) do { \
