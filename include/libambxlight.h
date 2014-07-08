@@ -2,7 +2,7 @@
 #define _LIBAMBXLIGHT_H__
 
 #include <stddef.h>
-#include <ambxlight_device.h>
+#include <libambxlight/ambxlight_device.h>
 
 #define MODE_CHANGE_REQUIRED 0x04
 

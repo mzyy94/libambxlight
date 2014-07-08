@@ -1,9 +1,9 @@
 #ifndef _AMBXLIGHT_H__
 #define _AMBXLIGHT_H__
 
-#include <libambxlight.h>
-#include <ambxlight_params.h>
-#include <ambxlight_ioctl.h>
-#include <ambxlight_device.h>
+#include <libambxlight/libambxlight.h>
+#include <libambxlight/ambxlight_params.h>
+#include <libambxlight/ambxlight_ioctl.h>
+#include <libambxlight/ambxlight_device.h>
 
 #endif
