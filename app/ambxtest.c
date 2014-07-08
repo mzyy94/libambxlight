@@ -24,7 +24,6 @@ int main(int argc, char const* argv[])
 {
 	Display* dpy;
 	Window root;
-	unsigned long color;
 	struct ambxlight_device *left_dev = NULL;
 	struct ambxlight_device *right_dev = NULL;
 	unsigned int i, j;
@@ -42,9 +41,10 @@ int main(int argc, char const* argv[])
 		fprintf(stderr, "Connected device count is not enough\n");
 		return -1;
 	}
+	ambxlight_get_params(&devices[0]);
+	ambxlight_get_params(&devices[0]);
+
 	for (i = 0; i < device_size; i++) {
-		ambxlight_set_color_mode(&devices[i]);
-		ambxlight_get_params(&devices[1]);
 		printf("device[%d] LOCATION = 0x%02x\n", i, devices[i].params.param.location);
 		printf("  intensity = %d\n", devices[i].params.param.intensity);
 		printf("  fd = %d\n", devices[i].fd);
@@ -59,16 +59,11 @@ int main(int argc, char const* argv[])
 		fprintf(stderr, "Device locations are not completed\n");
 		return -1;
 	}
-	printf("left = %ld\n", left_dev);
-	printf("right = %ld\n", right_dev);
 
 	XGetWindowAttributes(dpy, root, &attributes);
 
-	unsigned long long int r;
-	unsigned long long int g;
-	unsigned long long int b;
-	unsigned int count;
-	const static int step = 100;
+	const static int step = 143;
+	const static int padding = 37;
 
 	printf("w = %d\n", attributes.width);
 	printf("h = %d\n", attributes.height);
@@ -88,61 +83,58 @@ int main(int argc, char const* argv[])
 		return EXIT_FAILURE;
 	}
 
-	while (0) {	
-		ximage = XGetImage(dpy, root,
-				0, 0, attributes.width, attributes.height,
-				AllPlanes, XYPixmap);
-		XDestroyImage(ximage);
-		printf("color %02x%02x%02x\n", r, g, b);
-		//usleep(1000000/60);
+	if (SIG_ERR == signal(SIGSEGV, exit_safe)) {
+		return EXIT_FAILURE;
 	}
-		int cnt = ((attributes.width / 2 / step ) * (attributes.height / step));
-	   	// ((step - 1) * (step - 1));
-	while (1) {
-		count = 0;
-		r = g = b = 0;
-		for (i = 10; i < attributes.width / 2; i+=step) {
-			for (j = 10; j < attributes.height; j+=step) {
-				ximage = XGetImage(dpy, root,
-						i, j, 1, 1,
-						AllPlanes, XYPixmap);
-				color = XGetPixel(ximage, 0, 0);
-				XDestroyImage(ximage);
-				r += (color >> 16) & 0xff;
-				g += (color >> 8) & 0xff;
-				b += color & 0xff;
-				count++;
-			}
-		}
-		r /= count;
-		g /= count;
-		b /= count;
-		unsigned char c_l[3] = {r, g, b};
 
-		count = 0;
+	unsigned long long int r;
+	unsigned long long int g;
+	unsigned long long int b;
+	unsigned int count;
+	unsigned long color;
+	unsigned char c_l[3], c_r[3];
+
+	count = ((attributes.width - padding) / 2 / step + 1) * ((attributes.height - padding) / step + 1);
+
+	while (1) {
 		r = g = b = 0;
-		for (i = attributes.width / 2; i < attributes.width; i += step) {
-			for (j = 0; j < attributes.height; j += step) {
+		for (i = padding; i < attributes.width / 2; i += step) {
+			for (j = padding; j < attributes.height; j += step) {
 				ximage = XGetImage(dpy, root,
 						i, j, 1, 1,
-						AllPlanes, XYPixmap);
+						0x00FFFFFF, XYPixmap);
 				color = XGetPixel(ximage, 0, 0);
 				XDestroyImage(ximage);
 				r += (color >> 16) & 0xff;
 				g += (color >> 8) & 0xff;
 				b += color & 0xff;
-				count++;
 			}
 		}
-		r /= count;
-		g /= count;
-		b /= count;
-		unsigned char c_r[3] = {r, g, b};
-		ambxlight_change_color_boost(*left_dev, c_l);
-		ambxlight_change_color_boost(*right_dev, c_r);
+		c_l[0] = r / count;
+		c_l[1] = g / count;
+		c_l[2] = b / count;
+
+		r = g = b = 0;
+		for (i = attributes.width / 2; i < attributes.width - padding; i += step) {
+			for (j = padding; j < attributes.height - padding; j += step) {
+				ximage = XGetImage(dpy, root,
+						i, j, 1, 1,
+						0x00FFFFFF, XYPixmap);
+				color = XGetPixel(ximage, 0, 0);
+				XDestroyImage(ximage);
+				r += (color >> 16) & 0xff;
+				g += (color >> 8) & 0xff;
+				b += color & 0xff;
+			}
+		}
+		c_r[0] = r / count;
+		c_r[1] = g / count;
+		c_r[2] = b / count;
+
+		ambxlight_change_color_with_fade(*left_dev, c_l, 10);
+		ambxlight_change_color_with_fade(*right_dev, c_r, 10);
 
 		usleep(1000000/60);
-		//usleep(100000/60);
 	}
 	ambxlight_device_close_all(devices, device_size);
 	return 0;
