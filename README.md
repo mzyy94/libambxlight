@@ -1,4 +1,4 @@
-libambxgl
+libambxlight
 =========
 
-Drivers and libraries for amBX Gaming Lights device on Linux
+Drivers and libraries for Cyborg amBX Gaming Lights device on Linux
