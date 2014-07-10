@@ -109,7 +109,7 @@ int ambxlight_set_location(struct ambxlight_device *device, unsigned char locati
 }
 
 int ambxlight_get_params(struct ambxlight_device *device) {
-	return read(device->fd, &device->params, sizeof(device->params));
+	return read(device->fd, &device->params.raw, sizeof(device->params.raw));
 }
 
 struct ambxlight_device ambxlight_device_open(int index) {
@@ -132,6 +132,7 @@ struct ambxlight_device ambxlight_device_open(int index) {
 	if (device.fd > 1) {
 		device.mode = AMBXLIGHT_MODE_RAW;
 		ioctl(device.fd, AMBXLIGHT_IOCTL_SET, &device.mode);
+		ioctl(device.fd, AMBXLIGHT_IOCTL_GET, &device.mode);
 		ambxlight_get_params(&device);
 	}
 	return device;
@@ -141,15 +142,10 @@ size_t ambxlight_device_open_all(struct ambxlight_device *devices, size_t max_si
 	unsigned int i;
 	unsigned int size = 0;
 	for (i = 0; i < max_size; i++) {
-		struct ambxlight_device device = ambxlight_device_open(i);
-		if (device.fd > 0) {
+		struct ambxlight_device dev = ambxlight_device_open(i);
+		if (dev.fd > 0) {
+			devices[size] = dev;
 			size++;
-			if (devices == NULL) {
-				devices = (struct ambxlight_device *)malloc(sizeof(struct ambxlight_device));
-			} else {
-				devices = (struct ambxlight_device *)realloc(devices, sizeof(struct ambxlight_device) * size);
-			}
-			devices[size - 1] = device;
 		}
 	}
 	return size;

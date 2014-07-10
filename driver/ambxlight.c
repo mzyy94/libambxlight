@@ -10,6 +10,8 @@
  *
  */
 
+
+#include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
@@ -18,6 +20,7 @@
 #include <linux/uaccess.h>
 #include <linux/usb.h>
 #include <linux/mutex.h>
+#include <linux/proc_fs.h>
 
 #include "../include/ambxlight_params.h"
 #include "../include/ambxlight_ioctl.h"
@@ -25,6 +28,12 @@
 /* Define these values to match your devices */
 #define CYBORG_AMBX_LIGHT_VENDOR_ID	0x06a3
 #define CYBORG_AMBX_LIGHT_PRODUCT_ID	0x0dc5
+
+#define PROC_ROOT_DIR "ambx"
+#define PROC_LIGHT_DIR "light"
+#define PROC_COLOR_DIR "color"
+#define PROC_SPEED_DIR "speed"
+#define PROC_COLOR_ENTRY_HEX "hex"
 
 /* table of devices that work with this driver */
 static const struct usb_device_id ambx_light_table[] = {
@@ -328,6 +337,64 @@ exit:
 	return retval;
 }
 
+struct proc_dir_entry* root_dir;
+struct proc_dir_entry* light_dir;
+struct proc_dir_entry* color_dir;
+struct proc_dir_entry* proc_color_entry_hex;
+
+#define MAXBUF 64
+static char modtest_buf[ MAXBUF ];
+static int buflen;
+static unsigned long outbyte = 0;
+
+static ssize_t color_hex_write(struct file *filp, const char *buf, size_t len, loff_t *data)
+{
+	if (len >= MAXBUF) {
+		printk( KERN_WARNING "input length must be < %d, len = %lu\n", MAXBUF, len);
+		return -ENOSPC;
+	}
+
+	if (copy_from_user(modtest_buf, buf, len)) return -EFAULT;
+	modtest_buf[len] = '\0';
+	buflen = len;
+	outbyte = buflen;
+
+	return len;
+}
+
+static ssize_t color_hex_read(struct file *filp, char *buf, size_t len, loff_t *data)
+{
+	if (len > outbyte) {
+		len = outbyte;
+	} 
+	outbyte = outbyte - len; 
+	if (copy_to_user(buf, modtest_buf, len)) return -EFAULT;
+	if (len == 0) {
+		outbyte = buflen;
+	}
+	return len;
+}
+
+static int __init ambxlight_init(void)
+{
+	static const struct file_operations fops = {
+		.owner = THIS_MODULE,
+		.read = color_hex_read,
+		.write = color_hex_write
+	};
+	root_dir = proc_mkdir(PROC_ROOT_DIR, NULL);
+	light_dir = proc_mkdir(PROC_LIGHT_DIR, root_dir);
+	color_dir = proc_mkdir(PROC_COLOR_DIR, light_dir);
+	proc_color_entry_hex = proc_create(PROC_COLOR_ENTRY_HEX, 0, color_dir, &fops);
+	if (proc_color_entry_hex == NULL) {
+		printk(KERN_ERR "ambxlight: [err] %s(%u): create_proc_entry failed\n", __FUNCTION__, __LINE__);
+		return -EBUSY;
+	}
+
+    printk(KERN_INFO "ambxlight: driver loaded\n");
+    return 0;
+}
+
 static ssize_t ambx_light_pre_get_params(struct usb_ambx_light *dev);
 
 static void ambx_light_write_ctrl_callback(struct urb *urb)
@@ -361,6 +428,12 @@ static void ambx_light_write_ctrl_callback(struct urb *urb)
 		ambx_light_pre_get_params(dev);
 	}
 
+	remove_proc_entry(PROC_COLOR_ENTRY_HEX, color_dir);
+	remove_proc_subtree(PROC_COLOR_DIR, light_dir);
+	remove_proc_subtree(PROC_LIGHT_DIR, root_dir);
+	remove_proc_subtree(PROC_ROOT_DIR, NULL);
+
+    printk( KERN_INFO "ambxlight: driver removed\n" );
 }
 
 static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
