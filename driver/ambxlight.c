@@ -345,7 +345,7 @@ struct proc_dir_entry* proc_color_entry_hex;
 #define MAXBUF 64
 static char modtest_buf[ MAXBUF ];
 static int buflen;
-static unsigned long outbyte = 0;
+static unsigned long outbyte = 2;
 
 static ssize_t color_hex_write(struct file *filp, const char *buf, size_t len, loff_t *data)
 {
@@ -364,35 +364,39 @@ static ssize_t color_hex_write(struct file *filp, const char *buf, size_t len, l
 
 static ssize_t color_hex_read(struct file *filp, char *buf, size_t len, loff_t *data)
 {
+	struct usb_ambx_light *dev;
+	char outdata[2];
+	unsigned char loc;
+
+	dev = &data;
+
+	loc = dev->params.param.intensity;
+	outdata[0] = '0' + ((loc >> 4) && 0xf);
+	outdata[1] = '0' + (loc && 0xf);
 	if (len > outbyte) {
 		len = outbyte;
 	} 
 	outbyte = outbyte - len; 
-	if (copy_to_user(buf, modtest_buf, len)) return -EFAULT;
+	if (copy_to_user(buf, outdata, len)) return -EFAULT;
 	if (len == 0) {
-		outbyte = buflen;
+		outbyte = 2;
 	}
 	return len;
 }
 
 static int __init ambxlight_init(void)
 {
-	static const struct file_operations fops = {
-		.owner = THIS_MODULE,
-		.read = color_hex_read,
-		.write = color_hex_write
-	};
 	root_dir = proc_mkdir(PROC_ROOT_DIR, NULL);
 	light_dir = proc_mkdir(PROC_LIGHT_DIR, root_dir);
 	color_dir = proc_mkdir(PROC_COLOR_DIR, light_dir);
-	proc_color_entry_hex = proc_create(PROC_COLOR_ENTRY_HEX, 0, color_dir, &fops);
-	if (proc_color_entry_hex == NULL) {
-		printk(KERN_ERR "ambxlight: [err] %s(%u): create_proc_entry failed\n", __FUNCTION__, __LINE__);
+
+	int retval = usb_register(&ambx_light_driver);
+	if (retval) {
 		return -EBUSY;
 	}
 
     printk(KERN_INFO "ambxlight: driver loaded\n");
-    return 0;
+    return retval;
 }
 
 static ssize_t ambx_light_pre_get_params(struct usb_ambx_light *dev);
@@ -427,13 +431,6 @@ static void ambx_light_write_ctrl_callback(struct urb *urb)
 	} else if (urb->actual_length > 2 && urb->actual_length < 5) {
 		ambx_light_pre_get_params(dev);
 	}
-
-	remove_proc_entry(PROC_COLOR_ENTRY_HEX, color_dir);
-	remove_proc_subtree(PROC_COLOR_DIR, light_dir);
-	remove_proc_subtree(PROC_LIGHT_DIR, root_dir);
-	remove_proc_subtree(PROC_ROOT_DIR, NULL);
-
-    printk( KERN_INFO "ambxlight: driver removed\n" );
 }
 
 static ssize_t ambx_light_write(struct file *file, const char *user_buffer,
@@ -886,6 +883,17 @@ static int ambx_light_probe(struct usb_interface *interface,
 		 "Cyborg amBX Light Pods device now attached to amBXLight-%d",
 		 interface->minor);
 
+	static const struct file_operations fops = {
+		.owner = THIS_MODULE,
+		.read = color_hex_read,
+		.write = color_hex_write
+	};
+	proc_color_entry_hex = proc_create_data(PROC_COLOR_ENTRY_HEX, 0, color_dir, &fops, &dev);
+	if (proc_color_entry_hex == NULL) {
+		printk(KERN_ERR "ambxlight: [err] %s(%u): create_proc_entry failed\n", __FUNCTION__, __LINE__);
+		return -EBUSY;
+	}
+
 	ambx_light_pre_get_params(dev);
 	return 0;
 
@@ -978,7 +986,21 @@ static struct usb_driver ambx_light_driver = {
 	.supports_autosuspend = 1,
 };
 
-module_usb_driver(ambx_light_driver);
+static void __exit ambxlight_exit(void)
+{
+
+	remove_proc_entry(PROC_COLOR_ENTRY_HEX, color_dir);
+	remove_proc_subtree(PROC_COLOR_DIR, light_dir);
+	remove_proc_subtree(PROC_LIGHT_DIR, root_dir);
+	remove_proc_subtree(PROC_ROOT_DIR, NULL);
+
+	usb_deregister(&ambx_light_driver);
+    printk( KERN_INFO "ambxlight: driver removed\n" );
+}
+
+//module_usb_driver(ambx_light_driver);
+module_init(ambxlight_init);
+module_exit(ambxlight_exit);
 
 MODULE_DESCRIPTION("ambxlight");
 MODULE_AUTHOR("Yuki Mizuno");
