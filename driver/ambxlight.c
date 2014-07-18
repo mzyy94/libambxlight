@@ -18,6 +18,7 @@
 #include <linux/uaccess.h>
 #include <linux/usb.h>
 #include <linux/mutex.h>
+#include <linux/proc_fs.h>
 
 #include "../include/libambxlight/ambxlight_params.h"
 #include "../include/libambxlight/ambxlight_ioctl.h"
@@ -25,6 +26,14 @@
 /* Define these values to match your devices */
 #define CYBORG_AMBX_LIGHT_VENDOR_ID	0x06a3
 #define CYBORG_AMBX_LIGHT_PRODUCT_ID	0x0dc5
+
+/* Define proc directory/entry names */
+#define PROC_ROOT_DIR	"ambx"
+#define PROC_LIGHT_DIR	"light"
+#define PROC_LOCATION_ENTRY	"location"
+#define PROC_HEIGHT_ENTRY	"height"
+#define PROC_INTENSITY_ENTRY	"intensity"
+#define PROC_ENABLED_ENTRY	"enabled"
 
 /* table of devices that work with this driver */
 static const struct usb_device_id ambx_light_table[] = {
@@ -63,6 +72,7 @@ struct usb_ambx_light {
 	struct mutex		io_mutex;		/* synchronize I/O with disconnect */
 	union ambxlight_params params;		/* ambx device parameters */
 	unsigned char	transfer_mode;		/* transfer mode configured by ioctl */
+	struct proc_dir_entry* proc_dir;	/* linked proc directory entry */
 };
 #define to_ambx_light_dev(d) container_of(d, struct usb_ambx_light, kref)
 
@@ -326,6 +336,47 @@ error:
 
 exit:
 	return retval;
+}
+
+struct proc_dir_entry* root_dir;
+
+static ssize_t proc_entry_read(struct file *filp, char *buf, size_t len, loff_t *data)
+{
+	struct usb_ambx_light *dev;
+	static unsigned long outbyte = 5;
+	static unsigned long buflen;
+	char outdata[5];
+
+	dev = PDE_DATA(file_inode(filp));
+
+	switch (filp->f_path.dentry->d_iname[0]) {
+		case 'i': /* intensity */
+			buflen = sprintf(outdata, "%d\n", dev->params.param.intensity);
+			break;
+		case 'l': /* location */
+			buflen = sprintf(outdata, "%02x\n", dev->params.param.location);
+			break;
+		case 'h': /* height */
+			buflen = sprintf(outdata, "%02x\n", dev->params.param.height);
+			break;
+		case 'e': /* enabled */
+			buflen = sprintf(outdata, "%x\n", dev->params.param.enabled);
+			break;
+		default:
+			return -EFAULT;
+	}
+	if (outbyte > buflen) {
+		outbyte = buflen;
+	}
+	if (len > outbyte) {
+		len = outbyte;
+	}
+	outbyte = outbyte - len;
+	if (copy_to_user(buf, outdata, len)) return -EFAULT;
+	if (len == 0) {
+		outbyte = 5;
+	}
+	return len;
 }
 
 static ssize_t ambx_light_pre_get_params(struct usb_ambx_light *dev);
@@ -756,6 +807,11 @@ static int ambx_light_probe(struct usb_interface *interface,
 	struct usb_endpoint_descriptor *endpoint;
 	size_t buffer_size;
 	int retval = -ENOMEM;
+	char proc_dir_name[8];
+	static const struct file_operations proc_fops = {
+		.owner = THIS_MODULE,
+		.read = proc_entry_read,
+	};
 
 	/* allocate memory for our device state and initialize it */
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
@@ -813,6 +869,24 @@ static int ambx_light_probe(struct usb_interface *interface,
 		 "Cyborg amBX Light Pods device now attached to amBXLight-%d",
 		 interface->minor);
 
+	/* create proc directory */
+	sprintf(proc_dir_name, PROC_LIGHT_DIR "%d", interface->minor);
+	dev->proc_dir = proc_mkdir(proc_dir_name, root_dir);
+
+	/* create proc entries */
+	if (
+			(proc_create_data(PROC_INTENSITY_ENTRY, 0, dev->proc_dir, &proc_fops, dev) == NULL) ||
+			(proc_create_data(PROC_LOCATION_ENTRY, 0, dev->proc_dir, &proc_fops, dev) == NULL) ||
+			(proc_create_data(PROC_HEIGHT_ENTRY, 0, dev->proc_dir, &proc_fops, dev) == NULL) ||
+			(proc_create_data(PROC_ENABLED_ENTRY, 0, dev->proc_dir, &proc_fops, dev) == NULL)
+	   ){
+		dev_err(&interface->dev,
+			"%s - create_proc_entry failed\n",
+			__func__);
+
+		return -EBUSY;
+	}
+
 	ambx_light_pre_get_params(dev);
 	return 0;
 
@@ -827,9 +901,20 @@ static void ambx_light_disconnect(struct usb_interface *interface)
 {
 	struct usb_ambx_light *dev;
 	int minor = interface->minor;
+	char proc_dir_name[8];
 
 	dev = usb_get_intfdata(interface);
 	usb_set_intfdata(interface, NULL);
+
+	/* remove proc entries */
+	remove_proc_entry(PROC_INTENSITY_ENTRY, dev->proc_dir);
+	remove_proc_entry(PROC_LOCATION_ENTRY, dev->proc_dir);
+	remove_proc_entry(PROC_HEIGHT_ENTRY, dev->proc_dir);
+	remove_proc_entry(PROC_ENABLED_ENTRY, dev->proc_dir);
+
+	/* remove proc directory */
+	sprintf(proc_dir_name, PROC_LIGHT_DIR "%d", interface->minor);
+	remove_proc_subtree(proc_dir_name, root_dir);
 
 	/* give back our minor */
 	usb_deregister_dev(interface, &ambx_light_class);
@@ -905,7 +990,31 @@ static struct usb_driver ambx_light_driver = {
 	.supports_autosuspend = 1,
 };
 
-module_usb_driver(ambx_light_driver);
+static int __init ambxlight_init(void)
+{
+	int retval;
+	root_dir = proc_mkdir(PROC_ROOT_DIR, NULL);
+
+	retval = usb_register(&ambx_light_driver);
+	if (retval) {
+		return -EBUSY;
+	}
+
+	printk(KERN_INFO "ambxlight: driver loaded\n");
+	return retval;
+}
+
+static void __exit ambxlight_exit(void)
+{
+
+	usb_deregister(&ambx_light_driver);
+	remove_proc_subtree(PROC_ROOT_DIR, NULL);
+
+	printk( KERN_INFO "ambxlight: driver removed\n" );
+}
+
+module_init(ambxlight_init);
+module_exit(ambxlight_exit);
 
 MODULE_DESCRIPTION("ambxlight");
 MODULE_AUTHOR("Yuki Mizuno");
