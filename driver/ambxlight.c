@@ -367,12 +367,21 @@ static ssize_t color_hex_read(struct file *filp, char *buf, size_t len, loff_t *
 	struct usb_ambx_light *dev;
 	char outdata[2];
 	unsigned char loc;
+//	char *da;
 
-	dev = &data;
+	//dev = filp->private_data;
+	//dev = &data;
+	dev = PDE_DATA(file_inode(filp));
 
+//	da = PDE_DATA(file_inode(filp));
+
+//printk(KERN_INFO "dev: %c\n", da[0]);
 	loc = dev->params.param.intensity;
+	printk(KERN_INFO "loc: %d\n", loc);
 	outdata[0] = '0' + ((loc >> 4) && 0xf);
 	outdata[1] = '0' + (loc && 0xf);
+	outdata[0] = (char)data[0];
+	outdata[1] = (char)data[1];
 	if (len > outbyte) {
 		len = outbyte;
 	} 
@@ -386,11 +395,12 @@ static ssize_t color_hex_read(struct file *filp, char *buf, size_t len, loff_t *
 
 static int __init ambxlight_init(void)
 {
+	int retval;
 	root_dir = proc_mkdir(PROC_ROOT_DIR, NULL);
 	light_dir = proc_mkdir(PROC_LIGHT_DIR, root_dir);
 	color_dir = proc_mkdir(PROC_COLOR_DIR, light_dir);
 
-	int retval = usb_register(&ambx_light_driver);
+	retval = usb_register(&ambx_light_driver);
 	if (retval) {
 		return -EBUSY;
 	}
@@ -826,6 +836,11 @@ static int ambx_light_probe(struct usb_interface *interface,
 	struct usb_endpoint_descriptor *endpoint;
 	size_t buffer_size;
 	int retval = -ENOMEM;
+	static const struct file_operations fops = {
+		.owner = THIS_MODULE,
+		.read = color_hex_read,
+		.write = color_hex_write
+	};
 
 	/* allocate memory for our device state and initialize it */
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
@@ -883,12 +898,9 @@ static int ambx_light_probe(struct usb_interface *interface,
 		 "Cyborg amBX Light Pods device now attached to amBXLight-%d",
 		 interface->minor);
 
-	static const struct file_operations fops = {
-		.owner = THIS_MODULE,
-		.read = color_hex_read,
-		.write = color_hex_write
-	};
-	proc_color_entry_hex = proc_create_data(PROC_COLOR_ENTRY_HEX, 0, color_dir, &fops, &dev);
+	dev->params.param.intensity = 60;
+	char *msg = "b";
+	proc_color_entry_hex = proc_create_data(PROC_COLOR_ENTRY_HEX, 0, color_dir, &fops, dev);
 	if (proc_color_entry_hex == NULL) {
 		printk(KERN_ERR "ambxlight: [err] %s(%u): create_proc_entry failed\n", __FUNCTION__, __LINE__);
 		return -EBUSY;
