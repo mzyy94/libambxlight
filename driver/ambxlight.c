@@ -170,6 +170,10 @@ static int ambx_light_flush(struct file *file, fl_owner_t id)
 	return res;
 }
 
+static ssize_t ambx_light_write_data_to_device(struct usb_ambx_light *dev, char *data, size_t writesize);
+
+static ssize_t ambx_light_get_params(struct usb_ambx_light *dev);
+
 static void ambx_light_read_ctrl_callback(struct urb *urb)
 {
 	struct usb_ambx_light *dev;
@@ -213,6 +217,12 @@ static void ambx_light_read_ctrl_callback(struct urb *urb)
 	usb_free_coherent(urb->dev, urb->transfer_buffer_length,
 			  urb->transfer_buffer, urb->transfer_dma);
 	up(&dev->limit_sem);
+
+	if (urb->actual_length > 2 && (dev->params.raw[1] & 0xff) == 0xaa) {
+		char data[2] = {0xa7, 0x00};
+		ambx_light_write_data_to_device(dev, data, 2);
+	}
+		printk(KERN_INFO "len: %d, char: 0x%02x\n", urb->actual_length, dev->params.raw[1]);
 }
 
 static ssize_t ambx_light_read(struct file *file, char *user_buffer,
@@ -379,7 +389,65 @@ static ssize_t proc_entry_read(struct file *filp, char *buf, size_t len, loff_t 
 	return len;
 }
 
-static ssize_t ambx_light_pre_get_params(struct usb_ambx_light *dev);
+static ssize_t proc_entry_write(struct file *filp, const char *buf, size_t len, loff_t *data)
+{
+	struct usb_ambx_light *dev;
+	static char indata[5];
+	size_t writesize;
+	char senddata[4];
+
+	dev = PDE_DATA(file_inode(filp));
+
+	if( len >= 5){
+		printk( KERN_WARNING "input length must be < %d, len = %lu\n", 5, len);
+		return -ENOSPC;
+	}
+	if( copy_from_user( indata, buf, len ) ) return -EFAULT;
+	indata[len] = '\0';
+
+	switch (filp->f_path.dentry->d_iname[0]) {
+		case 'i': /* intensity */
+			sscanf(indata, "%d\n", (unsigned int *)&dev->params.param.intensity);
+			senddata[0] = 0xa6;
+			senddata[1] = dev->params.param.intensity;
+			senddata[2] = 0x00;
+			writesize = 3;
+			break;
+		case 'l': /* location */
+			sscanf(indata, "%02x\n", &dev->params.param.location);
+			if (dev->params.param.location == 0x00) {
+				dev->params.param.center = 0x01;
+			} else {
+				dev->params.param.center = 0x00;
+			}
+			senddata[0] = 0xa4;
+			senddata[1] = dev->params.param.location;
+			senddata[2] = dev->params.param.center;
+			senddata[3] = 0x00;
+			writesize = 4;
+			break;
+		case 'h': /* height */
+			sscanf(indata, "%02x\n", &dev->params.param.height);
+			senddata[0] = 0xa5;
+			senddata[1] = dev->params.param.height;
+			senddata[2] = 0x00;
+			writesize = 3;
+			break;
+		case 'e': /* enabled */
+			sscanf(indata, "%x\n", &dev->params.param.enabled);
+			senddata[0] = 0xa1;
+			senddata[1] = dev->params.param.enabled;
+			senddata[2] = 0x00;
+			writesize = 3;
+			break;
+		default:
+			return -EFAULT;
+	}
+
+	ambx_light_write_data_to_device(dev, senddata, writesize);
+
+	return len;
+}
 
 static void ambx_light_write_ctrl_callback(struct urb *urb)
 {
@@ -409,7 +477,8 @@ static void ambx_light_write_ctrl_callback(struct urb *urb)
 	if (urb->actual_length == 2) {
 		ambx_light_get_params(dev);
 	} else if (urb->actual_length > 2 && urb->actual_length < 5) {
-		ambx_light_pre_get_params(dev);
+		char data[2] = {0xa7, 0x00};
+		ambx_light_write_data_to_device(dev, data, 2);
 	}
 
 }
@@ -641,12 +710,11 @@ exit:
 	return retval;
 }
 
-static ssize_t ambx_light_pre_get_params(struct usb_ambx_light *dev)
+static ssize_t ambx_light_write_data_to_device(struct usb_ambx_light *dev, char* data, size_t writesize)
 {
 	int retval = 0;
 	struct urb *urb = NULL;
 	char *buf = NULL;
-	size_t writesize = 2;
 
 	/*
 	 * limit the number of URBs in flight to stop a user from using up all
@@ -682,8 +750,7 @@ static ssize_t ambx_light_pre_get_params(struct usb_ambx_light *dev)
 		retval = -ENOMEM;
 		goto error;
 	}
-	((char *)buf)[0] = 0xa7;
-	((char *)buf)[1] = 0x00;
+	buf = data;
 
 	/* this lock makes sure we don't submit URBs to gone devices */
 	mutex_lock(&dev->io_mutex);
@@ -811,6 +878,7 @@ static int ambx_light_probe(struct usb_interface *interface,
 	static const struct file_operations proc_fops = {
 		.owner = THIS_MODULE,
 		.read = proc_entry_read,
+		.write = proc_entry_write,
 	};
 
 	/* allocate memory for our device state and initialize it */
@@ -887,7 +955,8 @@ static int ambx_light_probe(struct usb_interface *interface,
 		return -EBUSY;
 	}
 
-	ambx_light_pre_get_params(dev);
+	char data[2] = {0xa7, 0x00};
+	ambx_light_write_data_to_device(dev, data, 2);
 	return 0;
 
 error:
