@@ -218,10 +218,12 @@ static void ambx_light_read_ctrl_callback(struct urb *urb)
 			  urb->transfer_buffer, urb->transfer_dma);
 	up(&dev->limit_sem);
 
+	/*
 	if (urb->actual_length > 2 && (dev->params.raw[1] & 0xff) == 0xaa) {
 		char data[2] = {0xa7, 0x00};
 		ambx_light_write_data_to_device(dev, data, 2);
 	}
+	*/
 		printk(KERN_INFO "len: %d, char: 0x%02x\n", urb->actual_length, dev->params.raw[1]);
 }
 
@@ -414,7 +416,7 @@ static ssize_t proc_entry_write(struct file *filp, const char *buf, size_t len, 
 			writesize = 3;
 			break;
 		case 'l': /* location */
-			sscanf(indata, "%02x\n", &dev->params.param.location);
+			sscanf(indata, "%02x\n", (unsigned int *)&dev->params.param.location);
 			if (dev->params.param.location == 0x00) {
 				dev->params.param.center = 0x01;
 			} else {
@@ -427,14 +429,14 @@ static ssize_t proc_entry_write(struct file *filp, const char *buf, size_t len, 
 			writesize = 4;
 			break;
 		case 'h': /* height */
-			sscanf(indata, "%02x\n", &dev->params.param.height);
+			sscanf(indata, "%02x\n", (unsigned int *)&dev->params.param.height);
 			senddata[0] = 0xa5;
 			senddata[1] = dev->params.param.height;
 			senddata[2] = 0x00;
 			writesize = 3;
 			break;
 		case 'e': /* enabled */
-			sscanf(indata, "%x\n", &dev->params.param.enabled);
+			sscanf(indata, "%x\n", (unsigned int *)&dev->params.param.enabled);
 			senddata[0] = 0xa1;
 			senddata[1] = dev->params.param.enabled;
 			senddata[2] = 0x00;
@@ -875,6 +877,7 @@ static int ambx_light_probe(struct usb_interface *interface,
 	size_t buffer_size;
 	int retval = -ENOMEM;
 	char proc_dir_name[8];
+	char data[2] = {0xa7, 0x00};
 	static const struct file_operations proc_fops = {
 		.owner = THIS_MODULE,
 		.read = proc_entry_read,
@@ -955,8 +958,8 @@ static int ambx_light_probe(struct usb_interface *interface,
 		return -EBUSY;
 	}
 
-	char data[2] = {0xa7, 0x00};
 	ambx_light_write_data_to_device(dev, data, 2);
+
 	return 0;
 
 error:
