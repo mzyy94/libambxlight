@@ -20,8 +20,8 @@
 #include <linux/mutex.h>
 #include <linux/proc_fs.h>
 
-#include "../include/libambxlight/ambxlight_params.h"
-#include "../include/libambxlight/ambxlight_ioctl.h"
+#include "ambxlight_params.h"
+#include "ambxlight_ioctl.h"
 
 /* Define these values to match your devices */
 #define CYBORG_AMBX_LIGHT_VENDOR_ID	0x06a3
