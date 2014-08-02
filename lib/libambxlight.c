@@ -5,98 +5,158 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 
-#include <libambxlight/ambxlight_ioctl.h>
-#include <libambxlight/ambxlight_params.h>
-#include <libambxlight/ambxlight_device.h>
+#include <libambxlight/libambxlight.h>
+#include <libambxlight/version.h>
 
-#define MODE_CHANGE_REQUIRED 0x04
-#define CHECK_AMBXLIGHT_MODE_COLOR(mode) do { \
-	if (mode != AMBXLIGHT_MODE_COLOR) \
-		return -MODE_CHANGE_REQUIRED; \
-} while (0)
+const struct libambxlight_version libambxlight_get_version() {
+	const struct libambxlight_version version = {
+		.major = LIBAMBXLIGHT_MAJOR,
+		.minor = LIBAMBXLIGHT_MINOR,
+		.micro = LIBAMBXLIGHT_MICRO,
+	};
 
-#define CHECK_AMBXLIGHT_MODE_RAW(mode) do { \
-	if (mode != AMBXLIGHT_MODE_RAW) \
-		return -MODE_CHANGE_REQUIRED; \
-} while (0)
-
-#define CHECK_AMBXLIGHT_MODE_HEXSTRING(mode) do { \
-	if (mode != AMBXLIGHT_MODE_HEXSTRING) \
-		return -MODE_CHANGE_REQUIRED; \
-} while (0)
-
-
-int ambxlight_set_color_mode(struct ambxlight_device *device) {
-	device->mode = AMBXLIGHT_MODE_COLOR;
-	return ioctl(device->fd, AMBXLIGHT_IOCTL_SET, &device->mode);
+	return version;
 }
 
-int ambxlight_set_raw_mode(struct ambxlight_device *device) {
-	device->mode = AMBXLIGHT_MODE_RAW;
-	return ioctl(device->fd, AMBXLIGHT_IOCTL_SET, &device->mode);
+ssize_t libambxlight_get_device_list(libambxlight_device ***list) {
+	unsigned int i;
+	unsigned int size = 0;
+	const unsigned int max_size = 128;
+	unsigned int fds[max_size];
+
+	for (i = 0; i < max_size; i++) {
+		libambxlight_device tmp_device = {
+			.minor = i
+		};
+		int retval = libambxlight_device_open(&tmp_device);
+		if (retval == 0) {
+			libambxlight_device_close(tmp_device);
+			fds[size] = i;
+			size++;
+		}
+	}
+
+	*list = (libambxlight_device **)malloc(sizeof(libambxlight_device *));
+	for (i = 0; i < size; i++) {
+		*list[i] = (libambxlight_device *)malloc(sizeof(libambxlight_device));
+		(*list[i])->minor = fds[i];
+	}
+
+	return size;
 }
 
-int ambxlight_set_hexstring_mode(struct ambxlight_device *device) {
-	device->mode = AMBXLIGHT_MODE_HEXSTRING;
-	return ioctl(device->fd, AMBXLIGHT_IOCTL_SET, &device->mode);
+void libambxlight_free_device_list(libambxlight_device **list) {
+	free(list);
 }
 
-int ambxlight_change_color_boost(struct ambxlight_device device, unsigned char *color) {
-	CHECK_AMBXLIGHT_MODE_COLOR(device.mode);
-	return write(device.fd, color, 3);
+int libambxlight_device_open(libambxlight_device *device) {
+	char name[20];
+	int retval;
+	struct stat file_stat;
+
+	sprintf(name, "/dev/ambx_light%d", device->minor);
+	if (stat(name, &file_stat) != 0) {
+		return -1;
+	}
+	if (!S_ISCHR(file_stat.st_mode)) {
+		return -2;
+	}
+	if ( !(((file_stat.st_mode & S_IRWXU) & S_IWUSR) &&
+				((file_stat.st_mode & S_IRWXU ) & S_IRUSR))) {
+		return -4;
+	}
+
+	device->fd = open(name, O_RDWR);
+	if (device->fd > 1) {
+		device->mode = (enum libambxlight_device_write_mode)RAW & 0xf;
+		ioctl(device->fd, AMBXLIGHT_IOCTL_SET, &device->mode);
+		libambxlight_get_params(device);
+	} else {
+		close(device->fd);
+		return -8;
+	}
+
+	return 0;
 }
 
-int ambxlight_change_color_with_fade(struct ambxlight_device device, unsigned char *color, unsigned int speed) {
-	CHECK_AMBXLIGHT_MODE_RAW(device.mode);
+void libambxlight_device_close(libambxlight_device device) {
+	device.mode = (enum libambxlight_device_write_mode)HEXSTRING & 0xf;
+	ioctl(device.fd, AMBXLIGHT_IOCTL_SET, &device.mode);
+	close(device.fd);
+	device.fd = -1;
+}
+
+void libambxlight_set_device_write_mode(libambxlight_device *device, enum libambxlight_device_write_mode mode) {
+	device->mode = mode & 0xff;
+	ioctl(device->fd, AMBXLIGHT_IOCTL_SET, &device->mode);
+}
+
+enum libambxlight_device_write_mode libambxlight_get_device_write_mode(libambxlight_device *device) {
+	ioctl(device->fd, AMBXLIGHT_IOCTL_GET, &device->mode);
+	return (enum libambxlight_device_write_mode)device->mode;
+}
+
+void libambxlight_change_color_rgb(libambxlight_device device, unsigned char r, unsigned char g, unsigned char b) {
 	unsigned char data[9] = {
 		0xa2,
 		0x00,
-		color[0],
-		color[1],
-		color[2],
-		speed & 0xff,
-		(speed > 8) & 0xff,
+		r,
+		g,
+		b,
+		0x00,
+		0x00,
 		0x00,
 		0x00
 	};
-	return write(device.fd, data, sizeof(data));
+	write(device.fd, data, sizeof(data));
 }
 
-int ambxlight_set_state(struct ambxlight_device *device, unsigned char state) {
-	CHECK_AMBXLIGHT_MODE_RAW(device->mode);
+void libambxlight_change_color_rgb_with_fade(libambxlight_device device, unsigned char r, unsigned char g, unsigned char b, unsigned int msec) {
+	unsigned char data[9] = {
+		0xa2,
+		0x00,
+		r,
+		g,
+		b,
+		msec & 0xff,
+		(msec >> 8) & 0xff,
+		0x00,
+		0x00
+	};
+	write(device.fd, data, sizeof(data));
+}
+
+void libambxlight_set_device_state(libambxlight_device *device, unsigned char state) {
 	unsigned char data[3] = {
 		0xa1,
 		0x00,
 		state
 	};
 	device->params.param.enabled = state;
-	return write(device->fd, data, sizeof(data));
+	write(device->fd, data, sizeof(data));
 }
 
-int ambxlight_set_intensity(struct ambxlight_device *device, unsigned char intensity) {
-	CHECK_AMBXLIGHT_MODE_RAW(device->mode);
+void libambxlight_set_device_intensity(libambxlight_device *device, unsigned char intensity) {
 	unsigned char data[3] = {
 		0xa6,
 		0x00,
 		intensity
 	};
 	device->params.param.intensity = intensity;
-	return write(device->fd, data, sizeof(data));
+	write(device->fd, data, sizeof(data));
 }
 
-int ambxlight_set_height(struct ambxlight_device *device, unsigned char height) {
-	CHECK_AMBXLIGHT_MODE_RAW(device->mode);
+void libambxlight_set_device_height(libambxlight_device *device, unsigned char height) {
 	unsigned char data[3] = {
 		0xa5,
 		0x00,
 		height
 	};
 	device->params.param.height = height;
-	return write(device->fd, data, sizeof(data));
+	write(device->fd, data, sizeof(data));
 }
 
-int ambxlight_set_location(struct ambxlight_device *device, unsigned char location) {
-	CHECK_AMBXLIGHT_MODE_RAW(device->mode);
+void libambxlight_set_device_location(libambxlight_device *device, unsigned char location) {
 	unsigned char data[4] = {
 		0xa4,
 		0x00,
@@ -105,67 +165,9 @@ int ambxlight_set_location(struct ambxlight_device *device, unsigned char locati
 	};
 	device->params.param.location = location;
 	device->params.param.center = location ? 0x00 : 0x01;
-	return write(device->fd, data, sizeof(data));
+	write(device->fd, data, sizeof(data));
 }
 
-int ambxlight_get_params(struct ambxlight_device *device) {
+int libambxlight_get_params(libambxlight_device *device) {
 	return read(device->fd, &device->params, sizeof(device->params));
-}
-
-struct ambxlight_device ambxlight_device_open(int index) {
-	char name[20];
-	int retval;
-	struct stat file_stat;
-	struct ambxlight_device device;
-	sprintf(name, "/dev/ambx_light%d", index);
-	if (stat(name, &file_stat) != 0) {
-		return (struct ambxlight_device){-1};
-	}
-	if (!S_ISCHR(file_stat.st_mode)) {
-		return (struct ambxlight_device){-2};
-	}
-	if ( !(((file_stat.st_mode & S_IRWXU) & S_IWUSR) &&
-				((file_stat.st_mode & S_IRWXU ) & S_IRUSR))) {
-		return (struct ambxlight_device){-4};
-	}
-	device.fd = open(name, O_RDWR);
-	if (device.fd > 1) {
-		device.mode = AMBXLIGHT_MODE_RAW;
-		ioctl(device.fd, AMBXLIGHT_IOCTL_SET, &device.mode);
-		ambxlight_get_params(&device);
-	}
-	return device;
-}
-
-size_t ambxlight_device_open_all(struct ambxlight_device *devices, size_t max_size) {
-	unsigned int i;
-	unsigned int size = 0;
-	for (i = 0; i < max_size; i++) {
-		struct ambxlight_device device = ambxlight_device_open(i);
-		if (device.fd > 0) {
-			size++;
-			if (devices == NULL) {
-				devices = (struct ambxlight_device *)malloc(sizeof(struct ambxlight_device));
-			} else {
-				devices = (struct ambxlight_device *)realloc(devices, sizeof(struct ambxlight_device) * size);
-			}
-			devices[size - 1] = device;
-		}
-	}
-	return size;
-}
-
-int ambxlight_device_close(struct ambxlight_device device) {
-	device.mode = AMBXLIGHT_MODE_HEXSTRING;
-	ioctl(device.fd, AMBXLIGHT_IOCTL_SET, &device.mode);
-	return close(device.fd);
-}
-
-int ambxlight_device_close_all(struct ambxlight_device *devices, size_t size) {
-	unsigned int i;
-	for (i = 0; i < size; i++) {
-		ambxlight_device_close(devices[i]);
-	}
-	free(devices);
-	return 0;
 }
